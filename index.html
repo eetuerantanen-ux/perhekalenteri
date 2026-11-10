@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="fi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="robots" content="noindex, nofollow">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#6b4a2f">
+<title>Perhekalenteri</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <header class="top">
+    <div class="brand">
+      <span class="brand-title">Perheen viikko</span>
+      <span class="brand-sub" id="brandSub"></span>
+    </div>
+    <div class="members" id="members"></div>
+    <div class="status" id="status"></div>
+  </header>
+
+  <main class="grid">
+    <section class="col col-a">
+      <div class="card clock">
+        <div class="time" id="time">--:--</div>
+        <div class="date" id="date"></div>
+        <div class="week" id="week"></div>
+      </div>
+      <div class="card weather" id="weather">
+        <div class="card-title">Sää · Koria</div>
+        <div class="empty">Ladataan…</div>
+      </div>
+    </section>
+
+    <section class="col col-b">
+      <div class="card today" id="today">
+        <div class="card-title">Tänään</div>
+      </div>
+      <div class="card menu" id="menu">
+        <div class="card-title">Ruokalista</div>
+      </div>
+    </section>
+
+    <section class="col col-c">
+      <div class="card upcoming" id="upcoming">
+        <div class="card-title">Tulevat päivät</div>
+      </div>
+      <div class="row2">
+        <div class="card reminders" id="reminders">
+          <div class="card-title">Muistutukset</div>
+        </div>
+        <div class="card todo" id="todo">
+          <div class="card-title">Muistilista</div>
+        </div>
+      </div>
+    </section>
+  </main>
+  <footer class="foot" id="foot"></footer>
+</div>
+<div id="lock" class="lock" hidden>
+  <form id="lockForm" class="lock-card" autocomplete="on">
+    <div class="lock-title">Perhekalenteri</div>
+    <p>Anna salasana avataksesi kalenterin. Salasana muistetaan tällä laitteella.</p>
+    <input id="lockPw" type="password" autocomplete="current-password" placeholder="Salasana" aria-label="Salasana">
+    <button id="lockBtn" type="submit">Avaa</button>
+    <div id="lockMsg" class="lock-msg"></div>
+  </form>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

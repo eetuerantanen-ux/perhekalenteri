@@ -1,0 +1,10 @@
+# Turvaverkko: selväkielistä dataa ei koskaan tähän repoon.
+data.json
+*.tmp
+raw/
+shared/
+screenshots/
+reference/
+*.png
+*.jpg
+.publish-state/
