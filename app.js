@@ -125,8 +125,8 @@
     const row = (PRICES?.hinnat || []).find((x) => { const a = Date.parse(x.alku); return a <= t && t < a + (PRICES.jakso_min || 15) * 60000; });
     const c = row ? row.c : null;
     el.className = "price " + priceClass(c);
-    el.innerHTML = `<div class="pv">${c == null ? "–" : c.toFixed(2).replace(".", ",")}</div><div class="pu">c/kWh · sis. alv</div>
-      <div class="pu">${row ? `klo ${hm(new Date(Date.parse(row.alku)))}–${hm(new Date(Date.parse(row.alku) + 15 * 60000))}` : "ei hintaa"}</div>`;
+    el.innerHTML = `<div class="pv">${c == null ? "–" : c.toFixed(2).replace(".", ",")}</div><div class="pu">c/kWh sis. alv</div>
+      <div class="pu">${row ? `${hm(new Date(Date.parse(row.alku)))}–${hm(new Date(Date.parse(row.alku) + 15 * 60000))}` : "ei hintaa"}</div>`;
   }
   async function loadPrices() {
     try { const r = await fetch(`prices.json?t=${Date.now()}`, { cache: "no-store" }); if (r.ok) PRICES = await r.json(); } catch (e) {}
