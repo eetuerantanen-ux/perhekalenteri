@@ -16,7 +16,7 @@
   const WD_LONG = ["sunnuntai", "maanantai", "tiistai", "keskiviikko", "torstai", "perjantai", "lauantai"];
   const MON = ["tammikuuta", "helmikuuta", "maaliskuuta", "huhtikuuta", "toukokuuta", "kesäkuuta", "heinäkuuta", "elokuuta", "syyskuuta", "lokakuuta", "marraskuuta", "joulukuuta"];
 
-  let DATA = null, lastFetchOk = true, lastFetchAt = null;
+  let DATA = null, lastFetchOk = true, lastFetchAt = null, PRICES = null;
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -75,6 +75,7 @@
   /* ---------- jäsenet ja värit ---------- */
   const member = (k) => (DATA?.jasenet?.[k]) || { nimi: k, tunnus: "?", vari: "#8a7a6a" };
   const evColor = (e) => member(e.henkilot?.[0] || e.kalenteri).vari;
+  const badges = (e) => e.hoitovuoro ? (e.henkilot || []).map((k) => { const m = member(k); return `<span class="mini" style="background:${m.vari}">${esc(m.tunnus)}</span>`; }).join("") : "";
   const evWho = (e) => (e.henkilot || []).map((k) => member(k).nimi).join(", ");
 
   /* ---------- tapahtumat päivälle ---------- */
@@ -108,11 +109,28 @@
   function renderHeader(n) {
     const p = hk(n);
     $("time").textContent = `${String(p.hh).padStart(2, "0")}.${String(p.mm).padStart(2, "0")}`;
-    $("date").textContent = `${WD_LONG[p.wd].replace(/^./, (x) => x.toUpperCase())} ${p.d}. ${MON[p.m - 1]}`;
+    $("date").innerHTML = `<b>${WD_LONG[p.wd].replace(/^./, (x) => x.toUpperCase())}</b><span>${p.d}. ${MON[p.m - 1]}</span>`;
+    if (p.ss === 0 || !$("price").innerHTML) renderPrice(n);
     $("week").textContent = `Viikko ${isoWeek(p.key)}`;
     $("brandSub").textContent = `${p.d}.${p.m}.${p.y}`;
     const night = forcedMode ? forcedMode === "yo" : (p.hh >= NIGHT_FROM || p.hh < NIGHT_TO);
     document.body.classList.toggle("night", night);
+  }
+
+  /* ---------- pörssisähkö (prices.json, julkinen) ---------- */
+  function priceClass(c) { if (c == null || !isFinite(c)) return "p-none"; if (c < 5) return "p-green"; if (c <= 15) return "p-yellow"; if (c <= 30) return "p-orange"; return "p-red"; }
+  function renderPrice(n) {
+    const el = $("price"); if (!el) return;
+    const t = n.getTime();
+    const row = (PRICES?.hinnat || []).find((x) => { const a = Date.parse(x.alku); return a <= t && t < a + (PRICES.jakso_min || 15) * 60000; });
+    const c = row ? row.c : null;
+    el.className = "price " + priceClass(c);
+    el.innerHTML = `<div class="pv">${c == null ? "–" : c.toFixed(2).replace(".", ",")}</div><div class="pu">c/kWh · sis. alv</div>
+      <div class="pu">${row ? `klo ${hm(new Date(Date.parse(row.alku)))}–${hm(new Date(Date.parse(row.alku) + 15 * 60000))}` : "ei hintaa"}</div>`;
+  }
+  async function loadPrices() {
+    try { const r = await fetch(`prices.json?t=${Date.now()}`, { cache: "no-store" }); if (r.ok) PRICES = await r.json(); } catch (e) {}
+    renderPrice(now());
   }
 
   function renderMembers() {
@@ -168,7 +186,7 @@
       if (shown >= MAX) continue;
       const end = e.endsAfter ? "" : (e.startsBefore ? "" : `<small>– ${hm(e.b)}</small>`);
       html += `<div class="ev${past ? " past" : ""}${cur ? " now" : ""}${e.alustava ? " tent" : ""}"><div class="t">${esc(e.time)}${end}</div>
-        <div class="body" style="border-color:${evColor(e)}"><div class="title">${esc(e.otsikko)}</div><div class="who">${esc(evWho(e))}${e.paikka ? " · " + esc(e.paikka) : ""}${e.alustava ? " · alustava" : ""}</div></div></div>`;
+        <div class="body" style="border-color:${evColor(e)}"><div class="title">${badges(e)}${esc(e.otsikko)}</div><div class="who">${esc(evWho(e))}${e.paikka ? " · " + esc(e.paikka) : ""}${e.alustava ? " · alustava" : ""}</div></div></div>`;
       shown++;
     }
     if (timed.length > shown) html += `<div class="more">+${timed.length - shown} muuta</div>`;
@@ -188,11 +206,17 @@
       const label = i === 1 ? "Huomenna" : `${WD_LONG[info.wd]}`;
       const wk = info.wd === 1 ? ` · vk ${isoWeek(key)}` : "";
       const MAXP = 3;
-      const pills = evs.slice(0, MAXP).map((e) => e.long
+      // Hoitovuorot yhdeksi tiiviiksi pilleriksi heti monipäiväisten jälkeen.
+      const shifts = evs.filter((e) => e.hoitovuoro), rest = evs.filter((e) => !e.hoitovuoro);
+      const items = [...rest.filter((e) => e.long), ...(shifts.length ? [{ shiftGroup: shifts }] : []), ...rest.filter((e) => !e.long)];
+      const pills = items.slice(0, MAXP).map((e) => e.shiftGroup
+        ? `<span class="pill" style="border-color:${evColor(e.shiftGroup[0])}">${e.shiftGroup.map((s) => `${badges(s)}<span class="pt">${esc(hm(s.a))}–${esc(hm(s.b))}</span>`).join("&nbsp;&nbsp;")}</span>`
+        : e.long
         ? `<span class="pill span${e.alustava ? " tent" : ""}" style="background:${evColor(e)}">${esc(e.otsikko)}${e.sub ? ` <small style="opacity:.85;font-weight:700">· ${esc(e.sub)}</small>` : ""}</span>`
         : `<span class="pill${e.alustava ? " tent" : ""}" style="border-color:${evColor(e)}"><span class="pt">${esc(e.time)}</span>${esc(e.otsikko)}</span>`).join("");
+      const extra = items.length - MAXP;
       html += `<div class="day${info.wd === 0 || info.wd === 6 ? " weekend" : ""}"><div class="dl"><b>${label}</b><span>${info.d}.${info.m}.${wk}${w ? ` ${wIcon(w.koodi, 1)}${deg(w.max)}` : ""}</span></div>
-        <div class="pills">${pills || '<span class="none">Ei merkintöjä</span>'}${evs.length > MAXP ? `<span class="more">+${evs.length - MAXP}</span>` : ""}</div></div>`;
+        <div class="pills">${pills || '<span class="none">Ei merkintöjä</span>'}${extra > 0 ? `<span class="more">+${extra}</span>` : ""}</div></div>`;
     }
     $("upcoming").innerHTML = html + "</div>";
   }
@@ -313,6 +337,7 @@
   function forget() { localStorage.removeItem(KEY_STORE); DATA = null; location.reload(); }
 
   async function load() {
+    loadPrices();
     try {
       const r = await fetch(`${DATA_URL}?t=${Date.now()}`, { cache: "no-store" });
       if (!r.ok) throw new Error(r.status);
