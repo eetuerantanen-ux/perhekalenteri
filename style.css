@@ -408,3 +408,131 @@ body.night .fc.p-yellow { color: #241a12; }
 .wd-wx { flex-wrap: wrap; }
 .dp-wx { justify-content: flex-start; }
 .dp-wx .fc { margin-left: auto; font-size: 18px; padding: 4px 10px; font-weight: 900; }
+
+/* ---------- sähkön hinta -linkki ja hintakäyrä-ikkuna ---------- */
+.price[role="button"] { cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent; transition: transform .08s ease; }
+.price[role="button"]:active { transform: scale(0.97); }
+.price[role="button"]:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+.price .plinks { display: flex; justify-content: center; gap: 10px; margin-top: 3px; }
+.price .plink { display: inline-flex; align-items: center; justify-content: center; gap: 3px; min-height: 22px;
+  font-family: "Fraunces", Georgia, serif; font-size: 15px; font-weight: 600; white-space: nowrap;
+  text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 2px; }
+.price .plink.fc { font-style: italic; }
+.price .pl-ico { width: 15px; height: 11px; flex: none; }
+
+.pricepop .daypop-card { width: min(1040px, 100%); }
+.pp-now { display: inline-flex; align-items: baseline; gap: 6px; padding: 2px 12px; border-radius: 999px; color: #fff; font-weight: 900; font-size: 17px; }
+.pp-now small { font-size: 13px; font-weight: 800; opacity: .9; }
+.pc-wrap { background: var(--card-2); border-radius: 16px; padding: 6px 8px 2px; }
+.pc-svg { display: block; width: 100%; height: auto; font-family: "Nunito", sans-serif; }
+.pc-grid { stroke: var(--line); stroke-width: 1; }
+.pc-grid.zero, .pc-axis { stroke: var(--ink-3); stroke-width: 1.5; }
+.pc-tick { stroke: var(--ink-3); stroke-width: 1.5; }
+.pc-ylab, .pc-xlab { fill: var(--ink-2); font-size: 14px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.pc-unit { fill: var(--ink-3); font-size: 12px; font-weight: 800; }
+.pc-day { fill: var(--ink-2); font-family: "Fraunces", Georgia, serif; font-size: 17px; font-weight: 600; }
+.pc-day.today { fill: var(--ink); }
+.pc-daysep { stroke: var(--ink-3); stroke-width: 2; stroke-dasharray: 5 4; }
+.pc-thr { stroke-width: 1.2; stroke-dasharray: 2 4; fill: none; }
+.pc-thr.p-yellow { stroke: #d4ad35; } .pc-thr.p-orange { stroke: #e67e22; } .pc-thr.p-red { stroke: #c93c3c; }
+.pc-bar.p-green { fill: #2e8b4a; } .pc-bar.p-yellow { fill: #f2c94c; } .pc-bar.p-orange { fill: #e67e22; } .pc-bar.p-red { fill: #c93c3c; }
+body.night .pc-bar.p-green { fill: #2f8a4a; } body.night .pc-bar.p-yellow { fill: #d4ad35; }
+body.night .pc-bar.p-orange { fill: #d47220; } body.night .pc-bar.p-red { fill: #c03a3a; }
+.pc-bar.past { opacity: 0.38; }
+.pc-bar.cur { stroke: var(--ink); stroke-width: 1.5; }
+.pc-now { stroke: var(--accent); stroke-width: 3; }
+.pc-nowdot { fill: var(--accent); }
+.pc-nowbox { fill: var(--accent); }
+.pc-nowtxt { fill: #fff; font-size: 14px; font-weight: 900; font-variant-numeric: tabular-nums; }
+.pp-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.pp-day { background: var(--card-2); border-radius: 14px; padding: 8px 14px; min-width: 0; }
+.pp-name { font-family: "Fraunces", Georgia, serif; font-size: 19px; font-weight: 600; margin-bottom: 4px; }
+.pp-name small { font-family: "Nunito", sans-serif; font-size: 14px; font-weight: 800; color: var(--ink-3); }
+.pp-vals { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.pp-v { display: inline-flex; align-items: center; gap: 6px; font-size: 15px; font-weight: 700; color: var(--ink-2); white-space: nowrap; }
+.pp-v b { font-size: 19px; font-weight: 900; color: var(--ink); font-variant-numeric: tabular-nums; }
+.pp-v small { font-size: 13px; color: var(--ink-3); font-weight: 700; }
+.pp-v i, .pp-legend i { width: 12px; height: 12px; border-radius: 4px; display: inline-block; flex: none; box-shadow: none; border: 0; }
+.pp-day.missing { border: 2px dashed var(--line); background: transparent; }
+.pp-miss { font-size: 15px; font-weight: 700; color: var(--ink-3); }
+.pp-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; font-size: 13.5px; font-weight: 800; color: var(--ink-2); }
+.pp-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.pp-legend .pp-src { margin-left: auto; color: var(--ink-3); font-weight: 700; }
+.pc-pending { fill: none; stroke: var(--line); stroke-width: 2; stroke-dasharray: 7 6; }
+.pc-pendtxt { fill: var(--ink-3); font-family: "Fraunces", Georgia, serif; font-size: 19px; font-weight: 600; }
+.pc-pendtxt.sub { font-family: "Nunito", sans-serif; font-size: 14px; font-weight: 800; }
+
+/* hinta / hintaennuste -välilehdet ikkunan otsikossa (kuten päivä · viikko · kuukausi) */
+.pp-tabs { display: flex; align-items: center; flex-wrap: wrap; gap: 0 2px; margin-left: -10px; }
+.pp-tab { display: inline-flex; align-items: center; min-height: 44px; padding: 0 10px; border-radius: 12px;
+  color: var(--ink); text-decoration: none; opacity: 0.5; touch-action: manipulation; font-size: 26px; font-weight: 500; }
+.pp-tab[data-pmode="fc"] { font-style: italic; }
+.pp-tab:not(.is-active):hover, .pp-tab:not(.is-active):focus-visible { opacity: 0.85; background: var(--card-2); outline: none; }
+.pp-tab.is-active { opacity: 1; font-weight: 600; text-decoration: underline; text-underline-offset: 6px; text-decoration-thickness: 3px; }
+.pp-sep { opacity: 0.4; font-size: 22px; font-weight: 700; }
+.pp-fc { display: inline-flex; padding: 2px 12px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-weight: 900; font-style: italic; font-size: 16px; }
+.pp-stats.three { grid-template-columns: 1fr 1fr 1fr; }
+.pp-stats.three .pp-vals { gap: 2px 12px; }
+.pp-day.fc b, .fc-chart .pc-ylab, .fc-chart .pc-xlab, .fc-chart .pc-day, .fc-chart .pc-unit { font-style: italic; }
+.fc-chart .pc-bar { opacity: 0.88; }
+.price[role="button"] { width: 134px; }
+
+/* ---------- napautettavat kortit (Muistutukset, Muistilista, Ruokalista) ja niiden ikkuna ---------- */
+#reminders[role="button"], #todo[role="button"], #menu[role="button"] { cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent; transition: transform .08s ease; }
+#reminders[role="button"]:active, #todo[role="button"]:active, #menu[role="button"]:active { transform: scale(0.985); }
+#reminders:focus-visible, #todo:focus-visible, #menu:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.card-link { margin-left: auto; flex: none; align-self: center; display: inline-flex; align-items: center; gap: 3px;
+  font-family: "Fraunces", Georgia, serif; font-size: 15px; font-weight: 600; color: var(--ink-2); white-space: nowrap;
+  text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 2px; text-decoration-color: var(--ink-3); }
+.card-link .cl-arr { text-decoration: none; display: inline-block; font-size: 18px; line-height: 1; margin-left: 1px; }
+
+.infopop .daypop-card { width: min(760px, 100%); }
+.infopop[data-mode="ruokalista"] .daypop-card { width: min(1040px, 100%); height: calc(100vh - 32px); }
+.ip-list { display: flex; flex-direction: column; }
+.ip-empty { font-size: 18px; font-weight: 700; color: var(--ink-3); padding: 8px 0 4px; }
+.ip-past-title { margin-top: 10px; color: var(--ink-2); }
+.ip-rem { display: grid; grid-template-columns: 92px 1fr; gap: 14px; align-items: center; padding: 9px 4px; border-top: 1px solid var(--line); }
+.ip-list .ip-rem:first-child { border-top: 0; }
+.ip-rem .d { font-weight: 900; font-size: 17px; text-align: center; background: var(--accent-soft); color: var(--accent); border-radius: 12px; padding: 5px 6px; line-height: 1.1; }
+.ip-rem .d small { display: block; font-size: 12.5px; font-weight: 800; margin-top: 2px; }
+.ip-rem.today .d { background: var(--accent); color: #fff; }
+.ip-rem .x { font-size: 19px; font-weight: 800; line-height: 1.25; }
+.ip-rem .src { display: flex; align-items: center; gap: 6px; margin-top: 3px; font-size: 14px; font-weight: 800; color: var(--ink-3); }
+.ip-kid { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; color: #fff; font-size: 12px; font-weight: 900; }
+.ip-list.past .ip-rem { opacity: 0.55; }
+.ip-list.past .ip-rem .d { background: var(--card-2); color: var(--ink-2); }
+.ip-ro { color: var(--ink-3); font-weight: 700; font-size: 14px; }
+.ip-todo { display: flex; align-items: center; gap: 14px; padding: 9px 4px; border-top: 1px solid var(--line); font-size: 19px; font-weight: 700; line-height: 1.3; }
+.ip-list .ip-todo:first-child { border-top: 0; }
+.ip-todo .box { width: 26px; height: 26px; flex: none; border: 3px solid var(--ink-3); border-radius: 8px; display: grid; place-items: center; font-size: 16px; font-weight: 900; color: var(--card); }
+.ip-todo.done { color: var(--ink-3); }
+.ip-todo.done .txt { text-decoration: line-through; text-decoration-thickness: 2px; }
+.ip-todo.done .box { background: var(--ink-3); }
+
+.ip-week { display: flex; flex-direction: column; gap: 6px; }
+.ip-day { display: grid; grid-template-columns: 210px 1fr; gap: 14px; padding: 9px 12px; border-radius: 16px; background: var(--card-2); }
+.ip-day.today { box-shadow: inset 0 0 0 3px var(--accent); background: var(--accent-soft); }
+.ip-day.past { opacity: 0.5; }
+.ip-dl b { display: block; font-family: "Fraunces", Georgia, serif; font-size: 21px; font-weight: 600; line-height: 1.15; }
+.ip-day.weekend .ip-dl b { color: var(--accent); }
+.ip-dl > span { font-size: 14px; font-weight: 800; color: var(--ink-3); }
+.ip-day.today .ip-dl > span { color: var(--accent); }
+.ip-shifts { display: flex; flex-direction: column; gap: 3px; margin-top: 5px; }
+.ip-shift { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; font-size: 14px; }
+.ip-shift b { font-weight: 900; font-variant-numeric: tabular-nums; margin-left: 2px; }
+.ip-shift .ptag { font-size: 11.5px; margin-left: 2px; }
+.ip-shift .mini { width: 20px; height: 20px; font-size: 11px; }
+.ip-src { margin-top: 4px; font-size: 12.5px; font-weight: 800; color: var(--ink-3); line-height: 1.25; }
+.ip-meals { display: flex; flex-direction: column; justify-content: center; min-width: 0; }
+.ip-meal { grid-template-columns: 104px 1fr; padding: 2px 0; }
+.ip-meal .mini { width: 20px; height: 20px; font-size: 11px; }
+.ip-msrc { display: inline-block; margin-left: 8px; padding: 0 7px; border-radius: 999px; border: 1.5px solid var(--line); font-size: 11.5px; font-weight: 800; color: var(--ink-3); white-space: nowrap; vertical-align: 1px; }
+.ip-nocare { font-size: 16px; font-weight: 700; color: var(--ink-3); }
+#todo .card-title, #reminders .card-title { gap: 6px; }
+#todo .card-link, #reminders .card-link { font-size: 14px; }
+.ip-day.nocare { padding-top: 6px; padding-bottom: 6px; align-items: center; }
+.ip-day.nocare .ip-dl { display: flex; align-items: baseline; gap: 10px; }
+.ip-day.nocare .ip-dl b { display: inline; font-size: 18px; }
+/* kapea Muistilista-kortti: pelkkä nuoli-merkki */
+#todo .card-link .cl-txt { display: none; }
+#todo .card-link .cl-arr { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: var(--card-2); border: 1.5px solid var(--line); font-size: 20px; color: var(--ink-2); }

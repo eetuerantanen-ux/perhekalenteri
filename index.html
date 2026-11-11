@@ -8,8 +8,8 @@
 <meta name="theme-color" content="#6b4a2f">
 <title>Perhekalenteri</title>
 <link rel="icon" href="data:,">
-<meta name="app-version" content="28613c906f">
-<link rel="stylesheet" href="style.css?v=28613c906f">
+<meta name="app-version" content="d82c209fb6">
+<link rel="stylesheet" href="style.css?v=d82c209fb6">
 </head>
 <body>
 <div id="app">
@@ -48,7 +48,7 @@
       <div class="card today" id="today">
         <div class="card-title">Tänään</div>
       </div>
-      <div class="card menu" id="menu">
+      <div class="card menu" id="menu" role="button" tabindex="0" aria-label="Avaa koko viikon ruokalista">
         <div class="card-title">Ruokalista</div>
       </div>
     </section>
@@ -58,10 +58,10 @@
         <div class="card-title">Tulevat päivät</div>
       </div>
       <div class="row2">
-        <div class="card reminders" id="reminders">
+        <div class="card reminders" id="reminders" role="button" tabindex="0" aria-label="Näytä kaikki muistutukset">
           <div class="card-title">Muistutukset</div>
         </div>
-        <div class="card todo" id="todo">
+        <div class="card todo" id="todo" role="button" tabindex="0" aria-label="Näytä koko muistilista">
           <div class="card-title">Muistilista</div>
         </div>
       </div>
@@ -106,6 +106,32 @@
     <button type="button" class="daypop-close" data-daypop-close>Sulje</button>
   </div>
 </div>
-<script src="app.js?v=28613c906f"></script>
+<div id="pricePop" class="daypop pricepop" hidden>
+  <div class="daypop-card" role="dialog" aria-modal="true" aria-labelledby="pricePopTitle">
+    <button type="button" class="daypop-x" data-pricepop-close aria-label="Sulje">×</button>
+    <div class="daypop-head">
+      <nav class="daypop-title pp-tabs" id="pricePopTitle" aria-label="Sähkön hinta">
+        <a href="#" class="pp-tab is-active" data-pmode="spot">Pörssisähkön hinta</a>
+        <span class="pp-sep" aria-hidden="true">·</span>
+        <a href="#" class="pp-tab" data-pmode="fc">Pörssisähkön hintaennuste</a>
+      </nav>
+      <div class="daypop-meta" id="pricePopMeta"></div>
+    </div>
+    <div class="daypop-body" id="pricePopBody"></div>
+    <button type="button" class="daypop-close" data-pricepop-close>Sulje</button>
+  </div>
+</div>
+<div id="infoPop" class="daypop infopop" hidden>
+  <div class="daypop-card" role="dialog" aria-modal="true" aria-labelledby="infoPopTitle">
+    <button type="button" class="daypop-x" data-infopop-close aria-label="Sulje">×</button>
+    <div class="daypop-head">
+      <div class="daypop-title" id="infoPopTitle"></div>
+      <div class="daypop-meta" id="infoPopMeta"></div>
+    </div>
+    <div class="daypop-body" id="infoPopBody"></div>
+    <button type="button" class="daypop-close" data-infopop-close>Sulje</button>
+  </div>
+</div>
+<script src="app.js?v=d82c209fb6"></script>
 </body>
 </html>

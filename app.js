@@ -19,7 +19,8 @@
   const MON_NOM = ["tammikuu", "helmikuu", "maaliskuu", "huhtikuu", "toukokuu", "kesäkuu", "heinäkuu", "elokuu", "syyskuu", "lokakuu", "marraskuu", "joulukuu"];
 
   let DATA = null, lastFetchOk = true, lastFetchAt = null, PRICES = null, FORECAST = null;
-  let currentView = "paiva", idleTimer = null, openDayKey = null;
+  let currentView = "paiva", idleTimer = null, openDayKey = null, pricePopOpen = false, infoPopMode = null;
+  const PRICES_URL = (LOCAL_DEV && params.get("hinnat")) || "prices.json"; // ?hinnat= vain paikalliseen testaukseen
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -226,14 +227,288 @@
     const c = row ? row.c : null;
     el.className = "price " + priceClass(c);
     el.innerHTML = `<div class="pv">${c == null ? "–" : c.toFixed(2).replace(".", ",")}</div><div class="pu">c/kWh sis. alv</div>
-      <div class="pu">${row ? `${hm(new Date(Date.parse(row.alku)))}–${hm(new Date(Date.parse(row.alku) + 15 * 60000))}` : "ei hintaa"}</div>`;
+      <div class="pu">${row ? `${hm(new Date(Date.parse(row.alku)))}–${hm(new Date(Date.parse(row.alku) + 15 * 60000))}` : "ei hintaa"}</div>
+      <div class="plinks"><span class="plink" data-pmode="spot">käyrä</span><span class="plink fc" data-pmode="fc">ennuste</span></div>`;
+    el.setAttribute("role", "button"); el.setAttribute("tabindex", "0");
+    el.setAttribute("aria-label", "Näytä pörssisähkön hintakäyrä");
   }
   async function loadPrices() {
-    try { const r = await fetch(`prices.json?t=${Date.now()}`, { cache: "no-store" }); if (r.ok) PRICES = await r.json(); } catch (e) {}
+    try { const r = await fetch(`${PRICES_URL}?t=${Date.now()}`, { cache: "no-store" }); if (r.ok) PRICES = await r.json(); } catch (e) {}
     renderPrice(now());
+    if (pricePopOpen) renderPricePop();
+  }
+
+  /* ---------- pörssisähkön hintakäyrä ja hintaennuste (leijuva ikkuna) ---------- */
+  const PRICE_ICON = `<svg class="pl-ico" viewBox="0 0 16 12" aria-hidden="true"><path d="M1 11V7h3V4h3v3h3V1h3v6h2" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
+  const fmtC = (c, d = 1) => (c == null || !isFinite(c)) ? "–" : c.toFixed(d).replace(".", ",").replace("-", "−");
+  let pricePopMode = "spot"; // "spot" = toteutunut pörssihinta, "fc" = hintaennuste
+  function seriesSlots(rows, stepMin, fromMs, toMs) {
+    const step = (stepMin || 15) * 60000, out = [];
+    for (const x of rows || []) {
+      const a = Date.parse(x.alku);
+      if (Number.isFinite(a) && Number.isFinite(x.c) && a >= fromMs && a < toMs) out.push({ a, b: a + step, c: x.c });
+    }
+    return out.sort((p, q) => p.a - q.a);
+  }
+  const dayStart = (key) => midnight(key).getTime(), dayEnd = (key) => midnight(addDays(key, 1)).getTime();
+  const spotSlots = (key) => seriesSlots(PRICES?.hinnat, PRICES?.jakso_min || 15, dayStart(key), dayEnd(key));
+  const fcSlots = (key) => seriesSlots(FORECAST?.tunnit, FORECAST?.jakso_min || 60, dayStart(key), dayEnd(key));
+  const slotsExpected = (key, stepMin) => (dayEnd(key) - dayStart(key)) / (stepMin * 60000);
+  const spotReady = (key) => spotSlots(key).length >= 0.9 * slotsExpected(key, PRICES?.jakso_min || 15);
+  function niceStep(range) {
+    for (const st of [1, 2, 5, 10, 20, 25, 50, 100, 200, 500]) if (range / st <= 6) return st;
+    return 1000;
+  }
+  function priceDayStats(slots) {
+    if (!slots.length) return null;
+    let mn = slots[0], mx = slots[0], sum = 0;
+    for (const x of slots) { if (x.c < mn.c) mn = x; if (x.c > mx.c) mx = x; sum += x.c; }
+    return { min: mn, max: mx, avg: sum / slots.length, n: slots.length };
+  }
+  function dayLabel(key, long) {
+    const info = hk(new Date(dayStart(key) + 12 * 3600e3));
+    return long ? `${WD_LONG[info.wd].replace(/^./, (c) => c.toUpperCase())} ${info.d}.${info.m}.` : `${WD[info.wd]} ${info.d}.${info.m}.`;
+  }
+  // days: [{key, slots, pending?: {title, sub}}]; opts.fc = ennuste (kursiivi, ~)
+  function priceChartSvg(days, n, opts = {}) {
+    const W = 940, H = 340, L = 50, R = 14, T = 30, B = 30;
+    const fc = !!opts.fc, tl = fc ? "~" : "";
+    const t0 = dayStart(days[0].key), t1 = dayEnd(days[days.length - 1].key);
+    const all = days.flatMap((d) => d.slots);
+    const vmax = Math.max(5, ...all.map((x) => x.c)), vmin = Math.min(0, ...all.map((x) => x.c));
+    const st = niceStep(vmax - vmin);
+    const yTop = Math.ceil(vmax / st) * st, yBot = Math.floor(vmin / st) * st;
+    const X = (t) => L + (t - t0) / (t1 - t0) * (W - L - R);
+    const Y = (c) => T + (yTop - c) / (yTop - yBot) * (H - T - B);
+    const nowMs = n.getTime();
+    let g = "";
+    for (let v = yBot; v <= yTop + 1e-9; v += st) {
+      g += `<line class="pc-grid${v === 0 ? " zero" : ""}" x1="${L}" x2="${W - R}" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}"/>`;
+      g += `<text class="pc-ylab" x="${L - 8}" y="${(Y(v) + 5).toFixed(1)}" text-anchor="end">${fmtC(v, 0)}</text>`;
+    }
+    g += `<text class="pc-unit" x="${L - 8}" y="${T - 14}" text-anchor="end">${tl}c/kWh</text>`;
+    for (const [v, cls] of [[5, "p-yellow"], [15, "p-orange"], [30, "p-red"]]) {
+      if (v < yTop) g += `<line class="pc-thr ${cls}" x1="${L}" x2="${W - R}" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}"/>`;
+    }
+    for (const x of all) {
+      const x0 = X(x.a), x1 = X(x.b), w = Math.max(1, x1 - x0 - (x1 - x0 > 3 ? (fc ? 2 : 0.8) : 0));
+      const ya = Y(Math.max(x.c, 0)), yb = Y(Math.min(x.c, 0));
+      const cur = x.a <= nowMs && nowMs < x.b, past = x.b <= nowMs;
+      g += `<rect class="pc-bar ${priceClass(x.c)}${past ? " past" : ""}${cur ? " cur" : ""}" x="${(x0 + (fc ? 1 : 0)).toFixed(1)}" y="${ya.toFixed(1)}" width="${w.toFixed(2)}" height="${Math.max(1, yb - ya).toFixed(1)}" rx="${fc ? 2 : 0.8}"/>`;
+    }
+    days.forEach((d, i) => {
+      const ds = dayStart(d.key), de = dayEnd(d.key);
+      const every = days.length > 2 ? 6 : 3;
+      for (let h = 0; h < 24; h += every) {
+        const t = ds + h * 3600e3; if (t >= de) break;
+        const x = X(t);
+        g += `<line class="pc-tick" x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="${H - B}" y2="${H - B + 5}"/>`;
+        g += `<text class="pc-xlab" x="${x.toFixed(1)}" y="${H - B + 21}" text-anchor="${x < L + 6 ? "start" : "middle"}">${String(h).padStart(2, "0")}</text>`;
+      }
+      g += `<text class="pc-day${d.key === hk(n).key ? " today" : ""}" x="${((X(ds) + X(de)) / 2).toFixed(1)}" y="${T - 12}" text-anchor="middle">${esc(dayLabel(d.key, true))}</text>`;
+      if (i > 0) g += `<line class="pc-daysep" x1="${X(ds).toFixed(1)}" x2="${X(ds).toFixed(1)}" y1="${T - 30}" y2="${H - B + 6}"/>`;
+      if (d.pending) {
+        const known = d.slots.reduce((m, x) => Math.max(m, x.b), ds);
+        const cx = (X(known) + X(de)) / 2, cy = (T + H - B) / 2;
+        g += `<rect class="pc-pending" x="${(X(known) + 4).toFixed(1)}" y="${T + 34}" width="${Math.max(0, X(de) - X(known) - 8).toFixed(1)}" height="${(H - B - T - 40).toFixed(1)}" rx="12"/>`;
+        g += `<text class="pc-pendtxt" x="${cx.toFixed(1)}" y="${(cy + 4).toFixed(1)}" text-anchor="middle">${esc(d.pending.title)}</text>`;
+        if (d.pending.sub) g += `<text class="pc-pendtxt sub" x="${cx.toFixed(1)}" y="${(cy + 26).toFixed(1)}" text-anchor="middle">${esc(d.pending.sub)}</text>`;
+      }
+    });
+    g += `<text class="pc-xlab" x="${X(t1).toFixed(1)}" y="${H - B + 21}" text-anchor="end">24</text>`;
+    g += `<line class="pc-axis" x1="${L}" x2="${W - R}" y1="${H - B}" y2="${H - B}"/>`;
+    if (nowMs >= t0 && nowMs < t1) {
+      const x = X(nowMs);
+      const cur = all.find((s) => s.a <= nowMs && nowMs < s.b);
+      g += `<line class="pc-now" x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="${T - 2}" y2="${H - B}"/>`;
+      const txt = `nyt ${hm(n)}${cur ? ` · ${tl}${fmtC(cur.c, 2)} c` : ""}`;
+      const tw = txt.length * 8.2 + 18, anchorLeft = x + tw + 8 > W - R;
+      const bx = anchorLeft ? x - tw - 6 : x + 6;
+      g += `<rect class="pc-nowbox" x="${bx.toFixed(1)}" y="${T + 2}" width="${tw.toFixed(0)}" height="24" rx="12"/>`;
+      g += `<text class="pc-nowtxt" x="${(bx + tw / 2).toFixed(1)}" y="${T + 19}" text-anchor="middle">${esc(txt)}</text>`;
+      g += `<circle class="pc-nowdot" cx="${x.toFixed(1)}" cy="${T - 2}" r="5"/>`;
+    }
+    return `<svg class="pc-svg${fc ? " fc-chart" : ""}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${fc ? "Pörssisähkön hintaennuste tunneittain" : "Pörssisähkön hinta 15 minuutin jaksoissa"}">${g}</svg>`;
+  }
+  function statsCard(name, s, fc, missingText) {
+    const tl = fc ? "~" : "";
+    if (!s) return `<div class="pp-day missing"><div class="pp-name">${name}</div><div class="pp-miss">${esc(missingText)}</div></div>`;
+    return `<div class="pp-day${fc ? " fc" : ""}"><div class="pp-name">${name}</div><div class="pp-vals">
+        <span class="pp-v"><i class="${priceClass(s.min.c)}"></i>min <b>${tl}${fmtC(s.min.c)}</b> <small>klo ${hm(new Date(s.min.a))}</small></span>
+        <span class="pp-v"><i class="${priceClass(s.avg)}"></i>ka <b>${tl}${fmtC(s.avg)}</b></span>
+        <span class="pp-v"><i class="${priceClass(s.max.c)}"></i>max <b>${tl}${fmtC(s.max.c)}</b> <small>klo ${hm(new Date(s.max.a))}</small></span>
+      </div></div>`;
+  }
+  const LEGEND = (src) => `<div class="pp-legend"><span><i class="p-green"></i>alle 5</span><span><i class="p-yellow"></i>5–15</span><span><i class="p-orange"></i>15–30</span><span><i class="p-red"></i>yli 30 c/kWh</span><span class="pp-src">${src}</span></div>`;
+  function renderSpotPop(n, body, meta) {
+    const today = hk(n).key, tomorrow = addDays(today, 1);
+    const dT = { key: today, slots: spotSlots(today) }, dN = { key: tomorrow, slots: spotSlots(tomorrow) };
+    const tomorrowReady = spotReady(tomorrow);
+    if (!tomorrowReady) dN.pending = { title: "Huomisen hinnat", sub: "tulevat iltapäivällä (n. klo 14–16)" };
+    const cur = dT.slots.find((s) => s.a <= n.getTime() && n.getTime() < s.b);
+    const step = PRICES?.jakso_min || 15;
+    meta.innerHTML = (cur ? `<span class="pp-now ${priceClass(cur.c)}">Nyt ${fmtC(cur.c, 2)} c/kWh <small>${hm(new Date(cur.a))}–${hm(new Date(cur.b))}</small></span>` : "")
+      + `<span>sis. alv 25,5 % · ${step} min jaksot</span>`;
+    if (!dT.slots.length && !dN.slots.length) { body.innerHTML = `<div class="empty">Hintatietoja ei ole juuri nyt saatavilla.</div>`; return; }
+    body.innerHTML = `<div class="pc-wrap">${priceChartSvg([dT, dN], n)}</div><div class="pp-stats">`
+      + statsCard(`Tänään <small>${dayLabel(today)}</small>`, priceDayStats(dT.slots), false, "Hintatietoja ei saatavilla.")
+      + statsCard(`Huomenna <small>${dayLabel(tomorrow)}</small>`, tomorrowReady ? priceDayStats(dN.slots) : null, false, "Huomisen hinnat julkaistaan iltapäivällä (n. klo 14–16).")
+      + `</div>` + LEGEND("Lähde: api.porssisahko.net");
+  }
+  function forecastDays(n) {
+    let k = hk(n).key;
+    for (let i = 0; i < 3 && spotReady(k); i++) k = addDays(k, 1); // ensimmäinen päivä ilman toteutunutta hintaa
+    return [k, addDays(k, 1), addDays(k, 2)];
+  }
+  function renderFcPop(n, body, meta) {
+    const keys = forecastDays(n);
+    const days = keys.map((key) => {
+      const d = { key, slots: fcSlots(key) };
+      if (d.slots.length < 0.9 * slotsExpected(key, FORECAST?.jakso_min || 60)) d.pending = { title: "Ei ennustetta", sub: d.slots.length ? "vain osa tunneista" : "" };
+      return d;
+    });
+    const haettu = FORECAST?.haettu ? new Date(FORECAST.haettu) : null;
+    meta.innerHTML = `<span class="pp-fc">Ennuste · ${esc(dayLabel(keys[0]))}–${esc(dayLabel(keys[2]))}</span>`
+      + `<span>sis. alv 25,5 % · tunneittain${haettu && !isNaN(haettu) ? ` · päivitetty ${haettu.getDate()}.${haettu.getMonth() + 1}. klo ${hm(haettu)}` : ""}</span>`;
+    if (!days.some((d) => d.slots.length)) { body.innerHTML = `<div class="empty">Hintaennustetta ei ole juuri nyt saatavilla.</div>`; return; }
+    const rel = (key) => { const diff = Math.round((dayStart(key) - dayStart(hk(n).key)) / 864e5); return diff === 1 ? "Huomenna" : diff === 2 ? "Ylihuomenna" : dayLabel(key, true).split(" ")[0]; };
+    const sub = (key) => { const diff = Math.round((dayStart(key) - dayStart(hk(n).key)) / 864e5); return diff <= 2 ? dayLabel(key) : dayLabel(key).split(" ")[1]; };
+    body.innerHTML = `<div class="pc-wrap fc">${priceChartSvg(days, n, { fc: true })}</div><div class="pp-stats three">`
+      + days.map((d) => statsCard(`${rel(d.key)} <small>${sub(d.key)}</small>`, d.pending ? null : priceDayStats(d.slots), true, "Ennustetta ei saatavilla.")).join("")
+      + `</div>` + LEGEND("Ennuste: sahkovatkain.web.app · suuntaa-antava");
+  }
+  function renderPricePop() {
+    const body = $("pricePopBody"), meta = $("pricePopMeta");
+    if (!body) return;
+    document.querySelectorAll("#pricePop .pp-tab").forEach((t) => {
+      const on = t.dataset.pmode === pricePopMode;
+      t.classList.toggle("is-active", on);
+      if (on) t.setAttribute("aria-current", "page"); else t.removeAttribute("aria-current");
+    });
+    $("pricePop").classList.toggle("is-fc", pricePopMode === "fc");
+    const n = now();
+    if (pricePopMode === "fc") renderFcPop(n, body, meta); else renderSpotPop(n, body, meta);
+  }
+  function openPricePop(mode) {
+    if (openDayKey) closeDayPop();
+    pricePopMode = mode === "fc" ? "fc" : "spot";
+    pricePopOpen = true;
+    renderPricePop();
+    const pop = $("pricePop"); if (pop) pop.hidden = false;
+    startIdleTimer();
+  }
+  function closePricePop() {
+    if (!pricePopOpen) return;
+    pricePopOpen = false;
+    const pop = $("pricePop"); if (pop) pop.hidden = true;
+    if (currentView === "paiva" && !infoPopMode) stopIdleTimer();
+  }
+
+  /* ---------- Muistutukset / Muistilista / Ruokalista: koko sisältö leijuvaan ikkunaan ---------- */
+  const CARD_LINK = (txt) => `<span class="card-link" aria-hidden="true"><span class="cl-txt">${esc(txt)}</span><span class="cl-arr">›</span></span>`;
+  const INFO_CARDS = { reminders: "muistutukset", todo: "muistilista", menu: "ruokalista" };
+  function daysFrom(todayKey, key) { return Math.round((midnight(key) - midnight(todayKey)) / 864e5); }
+  function relDay(days) {
+    if (days === 0) return "tänään"; if (days === 1) return "huomenna"; if (days === -1) return "eilen";
+    return days > 0 ? `${days} pv päästä` : `${-days} pv sitten`;
+  }
+  function remRowHtml(x, todayKey) {
+    let d = "–", sm = "";
+    if (x.pvm) { d = shortDate(x.pvm); sm = relDay(daysFrom(todayKey, x.pvm)); }
+    const kid = x.lapsi ? member(String(x.lapsi).toLowerCase()) : null;
+    const kidTag = kid ? `<span class="ip-kid" style="background:${kid.vari}">${esc(kid.tunnus)}</span><span>${esc(kid.nimi)}</span>` : "";
+    return `<div class="ip-rem${x.pvm === todayKey ? " today" : ""}"><div class="d">${esc(d)}${sm ? `<small>${esc(sm)}</small>` : ""}</div>
+      <div class="b"><div class="x">${esc(x.otsikko)}</div><div class="src">${kidTag}${kid && x.lahde ? "<span>·</span>" : ""}${x.lahde ? `<span>${esc(x.lahde)}</span>` : ""}${!kid && !x.lahde ? "<span>muistutus</span>" : ""}</div></div></div>`;
+  }
+  function renderRemindersPop(n) {
+    const r = DATA?.muistutukset, todayKey = hk(n).key;
+    if (!r || r.tila !== "ok") return { title: "Muistutukset", meta: "", body: `<div class="empty">Muistutukset eivät ole juuri nyt saatavilla.</div>` };
+    const all = (r.kohteet || []).slice().sort((a, b) => (a.pvm || "9999") < (b.pvm || "9999") ? -1 : (a.pvm || "9999") > (b.pvm || "9999") ? 1 : 0);
+    const upcoming = all.filter((x) => !x.pvm || x.pvm >= todayKey);
+    const past = all.filter((x) => x.pvm && x.pvm < todayKey).reverse(); // uusin mennyt ensin
+    const meta = `<span>${upcoming.length} tulossa</span>${past.length ? `<span>${past.length} mennyttä</span>` : ""}`;
+    if (!all.length) return { title: "Muistutukset", meta: "", body: `<div class="ip-empty">Ei muistutuksia.</div>` };
+    let body = `<div class="dp-sec-title">Tulossa</div>`;
+    body += upcoming.length ? `<div class="ip-list">${upcoming.map((x) => remRowHtml(x, todayKey)).join("")}</div>` : `<div class="ip-empty">Ei avoimia muistutuksia.</div>`;
+    if (past.length) body += `<div class="dp-sec-title ip-past-title">Menneet</div><div class="ip-list past">${past.map((x) => remRowHtml(x, todayKey)).join("")}</div>`;
+    return { title: "Muistutukset", meta, body };
+  }
+  function renderTodoPop() {
+    const t = DATA?.muistilista;
+    if (!t || t.tila !== "ok") return { title: "Muistilista", meta: "", body: `<div class="empty">Muistilista ei ole juuri nyt saatavilla.</div>` };
+    const open = (t.kohteet || []).filter((x) => !x.tehty), done = (t.kohteet || []).filter((x) => x.tehty);
+    const meta = `<span>${open.length} tekemättä</span><span>${done.length} tehty</span><span class="ip-ro">vain luku · muokkaus Google Keepissä</span>`;
+    if (!open.length && !done.length) return { title: "Muistilista", meta, body: `<div class="ip-empty">Lista on tyhjä.</div>` };
+    const row = (x) => `<div class="ip-todo${x.tehty ? " done" : ""}"><span class="box">${x.tehty ? "✓" : ""}</span><span class="txt">${esc(x.teksti)}</span></div>`;
+    let body = open.length ? `<div class="ip-list">${open.map(row).join("")}</div>` : `<div class="ip-empty">Kaikki tehty!</div>`;
+    if (done.length) body += `<div class="dp-sec-title ip-past-title">Tehdyt</div><div class="ip-list">${done.map(row).join("")}</div>`;
+    return { title: "Muistilista", meta, body };
+  }
+  function renderMenuPop(n) {
+    const todayKey = hk(n).key, mon = mondayOfIsoWeek(todayKey), sun = addDays(mon, 6);
+    const a = keyInfo(mon), b = keyInfo(sun);
+    const lists = DATA?.ruokalistat || [];
+    const meta = `<span>Viikko ${isoWeek(todayKey)} · ${a.d}.${a.m}.–${b.d}.${b.m}.</span><span>ateriat hoitoaikojen mukaan</span>`;
+    if (!lists.length) return { title: "Ruokalista", meta, body: `<div class="empty">Ruokalistoja ei saatu.</div>` };
+    let body = `<div class="ip-week">`;
+    for (let i = 0; i < 7; i++) {
+      const key = addDays(mon, i), info = keyInfo(key), menu = dayMenu(key);
+      const isToday = key === todayKey, past = key < todayKey;
+      const holiday = isHolidayKey(key), weekend = info.wd === 0 || info.wd === 6;
+      const shifts = careShiftsOn(key);
+      const shiftHtml = shifts.map((e) => `<span class="ip-shift">${badges(e)}<b>${esc(hm(e.a))}–${esc(hm(e.b))}</b>${puokkari(e)}</span>`).join("");
+      let right;
+      if (!menu.care) right = `<div class="ip-nocare">Ei hoitopäivä</div>`;
+      else if (!menu.meals.length) right = `<div class="ip-nocare">Ei ruokalistaa tälle päivälle</div>`;
+      else {
+        const multi = menu.sources.length > 1;
+        right = menu.meals.map((m) => {
+          const row = mealRowHtml(m, "dp-meal ip-meal");
+          return multi ? row.replace(/<\/div><\/div>$/, `<span class="ip-msrc">${esc(m.otsikko)}</span></div></div>`) : row;
+        }).join("");
+      }
+      body += `<div class="ip-day${menu.care ? "" : " nocare"}${isToday ? " today" : ""}${past ? " past" : ""}${weekend || holiday ? " weekend" : ""}" ${isToday ? 'id="ipToday"' : ""}>
+        <div class="ip-dl"><b>${esc(WD_LONG[info.wd].replace(/^./, (c) => c.toUpperCase()))}</b><span>${info.d}.${info.m}.${isToday ? " · tänään" : ""}</span>
+          ${shiftHtml ? `<div class="ip-shifts">${shiftHtml}</div>` : ""}
+          ${menu.sources.length ? `<div class="ip-src">${esc(menu.sources.join(" · "))}</div>` : ""}</div>
+        <div class="ip-meals">${right}</div></div>`;
+    }
+    body += `</div>`;
+    return { title: "Ruokalista", meta, body };
+  }
+  function renderInfoPop() {
+    if (!infoPopMode) return;
+    const n = now();
+    const r = infoPopMode === "muistutukset" ? renderRemindersPop(n) : infoPopMode === "muistilista" ? renderTodoPop() : renderMenuPop(n);
+    $("infoPopTitle").textContent = r.title;
+    $("infoPopMeta").innerHTML = r.meta;
+    const body = $("infoPopBody"), keep = body.scrollTop;
+    body.innerHTML = r.body;
+    body.scrollTop = keep;
+    $("infoPop").dataset.mode = infoPopMode;
+  }
+  function openInfoPop(mode) {
+    if (openDayKey) closeDayPop();
+    closePricePop();
+    infoPopMode = mode;
+    $("infoPopBody").scrollTop = 0;
+    renderInfoPop();
+    $("infoPop").hidden = false;
+    if (mode === "ruokalista") { // vieritä tähän päivään (kuluvan viikon loppu korostettuna)
+      const t = $("ipToday"), body = $("infoPopBody");
+      if (t && t.offsetTop > body.clientHeight * 0.5) body.scrollTop = t.offsetTop - 8;
+    }
+    startIdleTimer();
+  }
+  function closeInfoPop() {
+    if (!infoPopMode) return;
+    infoPopMode = null;
+    $("infoPop").hidden = true;
+    if (currentView === "paiva" && !pricePopOpen) stopIdleTimer();
   }
   async function loadForecast() {
     try { const r = await fetch(`forecast.json?t=${Date.now()}`, { cache: "no-store" }); if (r.ok) FORECAST = await r.json(); } catch (e) {}
+    if (pricePopOpen && pricePopMode === "fc") renderPricePop();
   }
   function realizedDayAvg(key) {
     const slots = PRICES?.hinnat || [];
@@ -364,7 +639,7 @@
     const lbl = !target ? "" : target === todayKey ? "tänään" : target === addDays(todayKey, 1) ? `huomenna ${shortDate(target)}` : shortDate(target);
     const menu = dayMenu(target);
     const sub = menu.sources.join(" · ");
-    let html = `<div class="card-title">Ruokalista <small>${esc(lbl)}</small></div>`;
+    let html = `<div class="card-title">Ruokalista <small>${esc(lbl)}</small>${CARD_LINK("koko viikko")}</div>`;
     if (sub) html += `<div class="menu-place">${esc(sub)}</div>`;
     if (!lists.length) html += `<div class="empty">Ruokalistoja ei saatu.</div>`;
     else if (!menu.care) html += `<div class="empty">Ei hoitopäivä</div>`;
@@ -376,7 +651,7 @@
   function renderReminders(n) {
     const r = DATA?.muistutukset;
     const todayKey = hk(n).key;
-    let html = `<div class="card-title">Muistutukset</div>`;
+    let html = `<div class="card-title">Muistutukset${CARD_LINK("kaikki")}</div>`;
     if (!r || r.tila !== "ok") {
       html += `<div class="tulossa"><b>Tulossa</b>eVakan muistutukset näkyvät tässä, kun yhteys on valmis.</div>`;
     } else {
@@ -399,7 +674,7 @@
 
   function renderTodo() {
     const t = DATA?.muistilista;
-    let html = `<div class="card-title">Muistilista</div>`;
+    let html = `<div class="card-title">Muistilista${CARD_LINK("kaikki")}</div>`;
     if (!t || t.tila !== "ok") html += `<div class="tulossa"><b>Tulossa</b>Google Keepin ”Muistilista” näkyy tässä, kun yhteys on valmis.</div>`;
     else {
       const open = t.kohteet.filter((x) => !x.tehty), done = t.kohteet.filter((x) => x.tehty);
@@ -621,11 +896,12 @@
     return (h === "viikko" || h === "kuukausi") ? h : "paiva";
   }
   function stopIdleTimer() { if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; } }
-  function startIdleTimer() { stopIdleTimer(); idleTimer = setTimeout(() => setView("paiva"), VIEW_IDLE_MS); }
-  function bumpIdle() { if (currentView !== "paiva") startIdleTimer(); }
+  function startIdleTimer() { stopIdleTimer(); idleTimer = setTimeout(() => { closePricePop(); closeInfoPop(); setView("paiva"); }, VIEW_IDLE_MS); }
+  function bumpIdle() { if (currentView !== "paiva" || pricePopOpen || infoPopMode) startIdleTimer(); }
   function setView(view, fromHash) {
     if (view !== "viikko" && view !== "kuukausi") view = "paiva";
     if (view === "paiva") closeDayPop();
+    if (view !== currentView) { closePricePop(); closeInfoPop(); }
     currentView = view;
     const want = view === "paiva" ? "" : "#" + view;
     if (!fromHash && (location.hash || "") !== want) {
@@ -641,7 +917,7 @@
       a.classList.toggle("is-active", on);
       if (on) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
     });
-    if (view !== "paiva") startIdleTimer(); else stopIdleTimer();
+    if (view !== "paiva" || pricePopOpen || infoPopMode) startIdleTimer(); else stopIdleTimer();
     if (DATA) {
       const nowV = now();
       if (view === "viikko") renderWeek(nowV);
@@ -658,6 +934,8 @@
     if (currentView === "viikko") renderWeek(n);
     if (currentView === "kuukausi") renderMonth(n);
     if (openDayKey) renderDayPop(openDayKey);
+    if (pricePopOpen) renderPricePop();
+    if (infoPopMode) renderInfoPop();
   }
 
   /* ---------- salaus: AES-GCM + PBKDF2 (WebCrypto) ---------- */
@@ -737,6 +1015,17 @@
     if (e.target && e.target.closest && e.target.closest("[data-daypop-close]")) { e.preventDefault(); closeDayPop(); return; }
     if (e.target && e.target.id === "dayPop") { closeDayPop(); return; }
     if (e.target && e.target.closest && e.target.closest("#dayPop")) return;
+    if (e.target && e.target.closest && e.target.closest("[data-pricepop-close]")) { e.preventDefault(); closePricePop(); return; }
+    if (e.target && e.target.id === "pricePop") { closePricePop(); return; }
+    const tab = e.target && e.target.closest && e.target.closest("#pricePop .pp-tab");
+    if (tab) { e.preventDefault(); pricePopMode = tab.dataset.pmode; renderPricePop(); startIdleTimer(); return; }
+    if (e.target && e.target.closest && e.target.closest("#pricePop")) return;
+    if (e.target && e.target.closest && e.target.closest("[data-infopop-close]")) { e.preventDefault(); closeInfoPop(); return; }
+    if (e.target && e.target.id === "infoPop") { closeInfoPop(); return; }
+    if (e.target && e.target.closest && e.target.closest("#infoPop")) return;
+    const infoCard = currentView === "paiva" && e.target && e.target.closest && e.target.closest("#reminders, #todo, #menu");
+    if (infoCard && DATA) { e.preventDefault(); openInfoPop(INFO_CARDS[infoCard.id]); return; }
+    if (e.target && e.target.closest && e.target.closest("#price")) { e.preventDefault(); const pl = e.target.closest("[data-pmode]"); openPricePop(pl ? pl.dataset.pmode : "spot"); return; }
     const cell = e.target.closest && e.target.closest("[data-day]");
     if (cell && (currentView === "viikko" || currentView === "kuukausi")) { openDayPop(cell.dataset.day); return; }
     if (e.target && e.target.closest && e.target.closest("[data-back]")) { e.preventDefault(); setView("paiva"); }
@@ -752,6 +1041,10 @@
   document.addEventListener("keydown", (e) => {
     bumpIdle();
     if (e.key === "Escape" && openDayKey) { e.preventDefault(); closeDayPop(); }
+    else if (e.key === "Escape" && pricePopOpen) { e.preventDefault(); closePricePop(); }
+    else if (e.key === "Escape" && infoPopMode) { e.preventDefault(); closeInfoPop(); }
+    else if ((e.key === "Enter" || e.key === " ") && e.target && INFO_CARDS[e.target.id] && DATA) { e.preventDefault(); openInfoPop(INFO_CARDS[e.target.id]); }
+    else if ((e.key === "Enter" || e.key === " ") && e.target && e.target.id === "price") { e.preventDefault(); openPricePop(); }
   }, true);
 
   // Kello tikittää sekunnin välein, muu näkymä päivittyy minuutin välein, data 5 min välein.
