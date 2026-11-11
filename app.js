@@ -76,6 +76,8 @@
   const member = (k) => (DATA?.jasenet?.[k]) || { nimi: k, tunnus: "?", vari: "#8a7a6a" };
   const evColor = (e) => member(e.henkilot?.[0] || e.kalenteri).vari;
   const badges = (e) => e.hoitovuoro ? (e.henkilot || []).map((k) => { const m = member(k); return `<span class="mini" style="background:${m.vari}">${esc(m.tunnus)}</span>`; }).join("") : "";
+  const puokkari = (e) => (e.hoitovuoro && typeof e.puokkari === "boolean")
+    ? `<span class="ptag${e.puokkari ? "" : " full"}" style="--c:${member(e.puokkari_kuka).vari}">${e.puokkari ? "Puokkari" : "Ei-puokkari"}</span>` : "";
   const evWho = (e) => (e.henkilot || []).map((k) => member(k).nimi).join(", ");
 
   /* ---------- tapahtumat päivälle ---------- */
@@ -186,7 +188,7 @@
       if (shown >= MAX) continue;
       const end = e.endsAfter ? "" : (e.startsBefore ? "" : `<small>– ${hm(e.b)}</small>`);
       html += `<div class="ev${past ? " past" : ""}${cur ? " now" : ""}${e.alustava ? " tent" : ""}"><div class="t">${esc(e.time)}${end}</div>
-        <div class="body" style="border-color:${evColor(e)}"><div class="title">${badges(e)}${esc(e.otsikko)}</div><div class="who">${esc(evWho(e))}${e.paikka ? " · " + esc(e.paikka) : ""}${e.alustava ? " · alustava" : ""}</div></div></div>`;
+        <div class="body" style="border-color:${evColor(e)}"><div class="title">${badges(e)}${esc(e.otsikko)}${puokkari(e)}</div><div class="who">${esc(evWho(e))}${e.paikka ? " · " + esc(e.paikka) : ""}${e.alustava ? " · alustava" : ""}</div></div></div>`;
       shown++;
     }
     if (timed.length > shown) html += `<div class="more">+${timed.length - shown} muuta</div>`;
@@ -210,7 +212,7 @@
       const shifts = evs.filter((e) => e.hoitovuoro), rest = evs.filter((e) => !e.hoitovuoro);
       const items = [...rest.filter((e) => e.long), ...(shifts.length ? [{ shiftGroup: shifts }] : []), ...rest.filter((e) => !e.long)];
       const pills = items.slice(0, MAXP).map((e) => e.shiftGroup
-        ? `<span class="pill" style="border-color:${evColor(e.shiftGroup[0])}">${e.shiftGroup.map((s) => `${badges(s)}<span class="pt">${esc(hm(s.a))}–${esc(hm(s.b))}</span>`).join("&nbsp;&nbsp;")}</span>`
+        ? `<span class="pill" style="border-color:${evColor(e.shiftGroup[0])}">${e.shiftGroup.map((s) => `${badges(s)}<span class="pt">${esc(hm(s.a))}–${esc(hm(s.b))}</span>${puokkari(s)}`).join("&nbsp;&nbsp;")}</span>`
         : e.long
         ? `<span class="pill span${e.alustava ? " tent" : ""}" style="background:${evColor(e)}">${esc(e.otsikko)}${e.sub ? ` <small style="opacity:.85;font-weight:700">· ${esc(e.sub)}</small>` : ""}</span>`
         : `<span class="pill${e.alustava ? " tent" : ""}" style="border-color:${evColor(e)}"><span class="pt">${esc(e.time)}</span>${esc(e.otsikko)}</span>`).join("");
