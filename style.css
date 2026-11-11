@@ -150,7 +150,9 @@ body.night .menu-col .veg { color: #8fc07a; }
 
 .menu-head { display: flex; align-items: center; gap: 6px; margin: -2px 0 6px; }
 .menu-head .avatar { width: 28px; height: 28px; font-size: 14px; }
-.menu-place { font-size: 14px; font-weight: 800; color: var(--ink-3); margin-left: 4px; }
+.menu-place { font-size: 14px; font-weight: 800; color: var(--ink-3); margin: -4px 0 6px; }
+.meal .m-kids, .dp-meal .m-kids { display: inline-flex; gap: 3px; margin-left: 8px; vertical-align: middle; }
+.meal .m-kids .mini, .dp-meal .m-kids .mini { width: 18px; height: 18px; font-size: 10px; }
 .meals { display: flex; flex-direction: column; gap: 6px; }
 .meal { display: grid; grid-template-columns: 92px 1fr; gap: 8px; align-items: baseline; line-height: 1.25; }
 .meal .mn { font-size: 13px; font-weight: 900; text-transform: uppercase; letter-spacing: .4px; color: var(--ink-3); }
@@ -263,6 +265,17 @@ body.night .p-red    { background: #a83232; }
 .week-day .none { font-size: 13px; padding-top: 4px; }
 .week-day .ptag { font-size: 10.5px; margin-left: 3px; padding: 0 5px; }
 .week-day .mini { width: 16px; height: 16px; font-size: 10px; margin-right: 2px; vertical-align: 1px; }
+.wd-meals {
+  flex: none; min-height: 0; margin-top: 2px; padding-top: 4px;
+  border-top: 1px dashed var(--line); display: flex; flex-direction: column; gap: 1px;
+}
+.wd-msrc { font-size: 10px; font-weight: 800; color: var(--ink-3); line-height: 1.2;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 1px; }
+.wd-meal { display: grid; grid-template-columns: 58px 1fr; gap: 3px; align-items: baseline; min-width: 0; }
+.wd-meal .mn { font-size: 9.5px; font-weight: 900; text-transform: uppercase; letter-spacing: .2px;
+  color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wd-meal .tx { font-size: 11px; font-weight: 800; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.wd-nocare { font-size: 11px; font-weight: 700; color: var(--ink-3); padding-top: 1px; }
 
 /* ---------- kuukausiruudukko ---------- */
 .month-grid {

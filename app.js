@@ -112,6 +112,99 @@
     return out;
   }
 
+
+  /* ---------- ruokalista hoitoajan ja lähteen mukaan ---------- */
+  const MEAL_ORDER = ["Aamupala", "Lounas", "Välipala", "Päivällinen", "Iltapala"];
+  function isWeekendKey(key) { const w = keyInfo(key).wd; return w === 0 || w === 6; }
+  function isHolidayKey(key) { return eventsForDay(key).some(isHolidayEv); }
+  function careShiftsOn(key) { return eventsForDay(key).filter((e) => e.hoitovuoro); }
+  function isCareDay(key) { return careShiftsOn(key).length > 0; }
+  function overnightStarts(key) {
+    const end = midnight(addDays(key, 1));
+    return careShiftsOn(key).some((e) => e.b > end);
+  }
+  function overnightEnds(key) {
+    const start = midnight(key);
+    return careShiftsOn(key).some((e) => e.a < start);
+  }
+  function listByRole(role) { return (DATA?.ruokalistat || []).find((l) => l.rooli === role); }
+  function menuListForMeal(key, mealName) {
+    const vuoro = listByRole("vuoro"), arki = listByRole("arki");
+    const n = (mealName || "").trim().toLowerCase();
+    const useVuoro = isWeekendKey(key) || isHolidayKey(key)
+      || (overnightStarts(key) && (n === "päivällinen" || n === "iltapala"))
+      || (overnightEnds(key) && n === "aamupala");
+    if (useVuoro && vuoro) return vuoro;
+    if (arki) return arki;
+    return vuoro || (DATA?.ruokalistat || [])[0] || null;
+  }
+  function mealKids(key, mealName) {
+    const shifts = careShiftsOn(key);
+    if (!shifts.length) return [];
+    const day0 = midnight(key).getTime(), next = midnight(addDays(key, 1)).getTime();
+    const at = (h, m) => day0 + (h * 60 + m) * 60000;
+    const kids = [];
+    const add = (who) => { for (const k of who || []) if (!kids.includes(k)) kids.push(k); };
+    for (const e of shifts) {
+      let ok = false;
+      if (mealName === "Aamupala") ok = Math.max(e.a.getTime(), day0) <= at(8, 0);
+      else if (mealName === "Lounas") ok = e.a.getTime() < at(11, 30) && e.b.getTime() > at(11, 0);
+      else if (mealName === "Välipala") ok = e.b.getTime() > at(14, 0);
+      else if (mealName === "Päivällinen") ok = e.b.getTime() > at(17, 0);
+      else if (mealName === "Iltapala") ok = e.b.getTime() > at(20, 0) || e.b.getTime() > next;
+      if (ok) add(e.henkilot);
+    }
+    return kids;
+  }
+  function careKids(key) {
+    const kids = [];
+    for (const e of careShiftsOn(key)) for (const k of e.henkilot || []) if (!kids.includes(k)) kids.push(k);
+    return kids;
+  }
+  function findMeal(list, key, name) {
+    const day = (list?.paivat || []).find((d) => d.pvm === key);
+    return (day?.ateriat || []).find((a) => (a.ateria || "").trim().toLowerCase() === name.toLowerCase());
+  }
+  function dayMenu(key) {
+    const care = isCareDay(key);
+    if (!care) return { care: false, meals: [], sources: [] };
+    const allKids = careKids(key);
+    const meals = [], sources = [];
+    for (const name of MEAL_ORDER) {
+      const kids = mealKids(key, name);
+      if (!kids.length) continue;
+      const list = menuListForMeal(key, name);
+      const item = findMeal(list, key, name);
+      if (!item || !item.ruoat?.length) continue;
+      const otsikko = list?.otsikko || "";
+      meals.push({ name, item, kids, allKids, otsikko });
+      if (otsikko && !sources.includes(otsikko)) sources.push(otsikko);
+    }
+    return { care: true, meals, sources };
+  }
+  function mealRowHtml(m, cls) {
+    const [main, ...sides] = m.item.ruoat.map((r) => r.nimi);
+    const lunch = /^lounas$/i.test(m.name);
+    const differ = m.kids.length !== m.allKids.length;
+    const av = differ ? m.kids.map((k) => { const x = member(k); return `<span class="mini" style="background:${x.vari}">${esc(x.tunnus)}</span>`; }).join("") : "";
+    return `<div class="${cls}${lunch ? " lunch" : ""}"><div class="mn">${esc(m.name)}</div><div><span class="main">${esc(main)}</span>${sides.length ? `<span class="side">, ${esc(sides.join(", "))}</span>` : ""}${av ? `<span class="m-kids">${av}</span>` : ""}</div></div>`;
+  }
+  function nextCareDay(fromKey, inclusive) {
+    const start = inclusive ? fromKey : addDays(fromKey, 1);
+    const evs = DATA?.tapahtumat || [];
+    const keys = new Set();
+    for (const ev of evs) {
+      if (!ev.hoitovuoro) continue;
+      const a = hk(new Date(ev.alku)).key;
+      const b = ev.kokopaiva ? addDays(hk(new Date(ev.loppu)).key, -1) : hk(new Date(ev.loppu)).key;
+      let k = a;
+      // overnight may span 2 days
+      const last = b >= a ? b : a;
+      while (k <= last) { if (k >= start) keys.add(k); if (k === last) break; k = addDays(k, 1); if (keys.size > 60) break; }
+    }
+    return [...keys].sort()[0] || null;
+  }
+
   /* ---------- renderöinti ---------- */
   function renderHeader(n) {
     const p = hk(n);
@@ -266,27 +359,17 @@
     const lists = DATA?.ruokalistat || [];
     const p = hk(n);
     const todayKey = p.key;
-    // Ennen klo 13 näytetään tämän päivän lounas, sen jälkeen seuraavan päivän, jolle lista löytyy.
-    const allDates = [...new Set(lists.flatMap((l) => (l.paivat || []).filter((d) => d.ateriat?.length).map((d) => d.pvm)))].sort();
-    const target = allDates.find((d) => (p.hh < 13 ? d >= todayKey : d > todayKey));
+    // Ennen klo 13 tämän päivän lista, sen jälkeen seuraava hoitopäivä. Ateriat suodatetaan hoitoajan mukaan.
+    const target = p.hh < 13 ? todayKey : (nextCareDay(todayKey, false) || todayKey);
     const lbl = !target ? "" : target === todayKey ? "tänään" : target === addDays(todayKey, 1) ? `huomenna ${shortDate(target)}` : shortDate(target);
+    const menu = dayMenu(target);
+    const sub = menu.sources.join(" · ");
     let html = `<div class="card-title">Ruokalista <small>${esc(lbl)}</small></div>`;
-    const SHOW = ["Aamupala", "Lounas", "Välipala"];
-    for (const l of lists) {
-      const kids = (l.henkilot || []).map(member);
-      html += `<div class="menu-head">${kids.map((m) => `<span class="avatar" style="background:${m.vari}">${esc(m.tunnus)}</span>`).join("")}
-        <span class="menu-place">${esc(kids.map((m) => m.nimi).join(" ja "))} · ${esc(l.otsikko)}</span></div>`;
-      if (!l.ok) { html += `<div class="empty">Ruokalistaa ei saatu.</div>`; continue; }
-      const day = (l.paivat || []).find((d) => d.pvm === target);
-      const meals = SHOW.map((n) => day?.ateriat?.find((x) => x.ateria.trim().toLowerCase() === n.toLowerCase())).filter(Boolean);
-      if (!meals.length) { html += `<div class="empty">Ei ruokalistaa tälle päivälle.</div>`; continue; }
-      html += `<div class="meals">` + meals.map((m) => {
-        const [main, ...sides] = m.ruoat.map((r) => r.nimi);
-        const lunch = /^lounas$/i.test(m.ateria.trim());
-        return `<div class="meal${lunch ? " lunch" : ""}"><div class="mn">${esc(m.ateria.trim())}</div><div><span class="main">${esc(main)}</span>${sides.length ? `<span class="side">, ${esc(sides.join(", "))}</span>` : ""}</div></div>`;
-      }).join("") + `</div>`;
-    }
+    if (sub) html += `<div class="menu-place">${esc(sub)}</div>`;
     if (!lists.length) html += `<div class="empty">Ruokalistoja ei saatu.</div>`;
+    else if (!menu.care) html += `<div class="empty">Ei hoitopäivä</div>`;
+    else if (!menu.meals.length) html += `<div class="empty">Ei ruokalistaa tälle päivälle.</div>`;
+    else html += `<div class="meals">` + menu.meals.map((m) => mealRowHtml(m, "meal")).join("") + `</div>`;
     $("menu").innerHTML = html;
   }
 
@@ -352,8 +435,10 @@
       const wx = (w || fc) ? `<div class="wd-wx">${w ? `${wIcon(w.koodi, 1)}<span>${deg(w.max)}</span>` : ""}${fc}</div>` : "";
       const longs = evs.filter((e) => e.long), timed = evs.filter((e) => !e.long);
       const items = [...longs, ...timed];
+      const menu = dayMenu(key);
+      const lim = menu.meals.length ? Math.min(MAX, 4) : MAX;
       let list = "";
-      for (const e of items.slice(0, MAX)) {
+      for (const e of items.slice(0, lim)) {
         if (e.long) {
           const sub = e.sub && String(e.sub).includes("päättyy") ? ` <small style="opacity:.8">· ${esc(e.sub)}</small>` : "";
           list += `<div class="wv-banner${e.alustava ? " tent" : ""}" style="background:${evColor(e)}22;border-left:5px solid ${evColor(e)}">${esc(e.otsikko)}${sub}</div>`;
@@ -364,10 +449,23 @@
             <div class="body" style="border-color:${evColor(e)}"><span class="title">${badges(e)}${esc(e.otsikko)}</span>${puokkari(e)}<div class="who">${esc(evWho(e))}</div></div></div>`;
         }
       }
-      const extra = items.length - MAX;
+      const extra = items.length - lim;
       if (extra > 0) list += `<div class="more">+${extra}</div>`;
       if (!items.length) list += `<div class="none">Ei merkintöjä</div>`;
-      html += `<div class="${cls}" data-day="${key}"><div class="wd-head"><span class="wd-name">${esc(WD[info.wd])}</span><span class="wd-num">${info.d}.</span></div>${wx}<div class="wv-list">${list}</div></div>`;
+      let meals = "";
+      if (menu.care && menu.meals.length) {
+        meals = `<div class="wd-meals">${menu.sources.length ? `<div class="wd-msrc">${esc(menu.sources.join(" · "))}</div>` : ""}` +
+          menu.meals.map((m) => {
+            const main = m.item.ruoat[0]?.nimi || "";
+            const short = ({Aamupala:"Aamu",Lounas:"Lounas",Välipala:"Väli",Päivällinen:"Päivä",Iltapala:"Ilta"})[m.name] || m.name;
+            const differ = m.kids.length !== m.allKids.length;
+            const av = differ ? m.kids.map((k) => { const x = member(k); return `<span class="mini" style="background:${x.vari}">${esc(x.tunnus)}</span>`; }).join("") : "";
+            return `<div class="wd-meal"><span class="mn">${esc(short)}</span><span class="tx">${av}${esc(main)}</span></div>`;
+          }).join("") + `</div>`;
+      } else if (!menu.care) {
+        meals = `<div class="wd-meals"><div class="wd-nocare">Ei hoitopäivä</div></div>`;
+      }
+      html += `<div class="${cls}" data-day="${key}"><div class="wd-head"><span class="wd-name">${esc(WD[info.wd])}</span><span class="wd-num">${info.d}.</span></div>${wx}<div class="wv-list">${list}</div>${meals}</div>`;
     }
     el.innerHTML = html;
   }
@@ -481,27 +579,13 @@
     }
     html += `</div>`;
 
-    const SHOW = ["Aamupala", "Lounas", "Välipala"];
-    const menus = [];
-    for (const l of DATA?.ruokalistat || []) {
-      const day = (l.paivat || []).find((d) => d.pvm === key);
-      const meals = SHOW.map((n) => day?.ateriat?.find((x) => x.ateria.trim().toLowerCase() === n.toLowerCase())).filter(Boolean);
-      if (meals.length) menus.push({ l, meals });
-    }
-    if (menus.length) {
-      html += `<div><div class="dp-sec-title">Ruokalista</div>`;
-      for (const { l, meals } of menus) {
-        const kids = (l.henkilot || []).map(member);
-        html += `<div class="dp-menu-head">${kids.map((m) => `<span class="avatar" style="background:${m.vari}">${esc(m.tunnus)}</span>`).join("")}
-          <span>${esc(kids.map((m) => m.nimi).join(" ja "))}${l.otsikko ? " · " + esc(l.otsikko) : ""}</span></div>`;
-        html += meals.map((m) => {
-          const [main, ...sides] = m.ruoat.map((r) => r.nimi);
-          const lunch = /^lounas$/i.test(m.ateria.trim());
-          return `<div class="dp-meal${lunch ? " lunch" : ""}"><div class="mn">${esc(m.ateria.trim())}</div><div><span class="main">${esc(main)}</span>${sides.length ? `<span class="side">, ${esc(sides.join(", "))}</span>` : ""}</div></div>`;
-        }).join("");
-      }
-      html += `</div>`;
-    }
+    const menu = dayMenu(key);
+    html += `<div><div class="dp-sec-title">Ruokalista</div>`;
+    if (menu.sources.length) html += `<div class="dp-menu-head"><span>${esc(menu.sources.join(" · "))}</span></div>`;
+    if (!menu.care) html += `<div class="empty">Ei hoitopäivä</div>`;
+    else if (!menu.meals.length) html += `<div class="empty">Ei ruokalistaa tälle päivälle.</div>`;
+    else html += menu.meals.map((m) => mealRowHtml(m, "dp-meal")).join("");
+    html += `</div>`;
 
     const r = DATA?.muistutukset;
     const rems = (r && r.tila === "ok") ? (r.kohteet || []).filter((x) => x.pvm === key) : [];
