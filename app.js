@@ -336,7 +336,19 @@
   }
   function forget() { localStorage.removeItem(KEY_STORE); DATA = null; location.reload(); }
 
+  // Uusi sivuversio julkaistu -> lataa sivu uudelleen välimuistin ohi.
+  const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || "";
+  async function checkVersion() {
+    if (LOCAL_DEV || !APP_VERSION || APP_VERSION.startsWith("__")) return;
+    try {
+      const r = await fetch(`version.json?t=${Date.now()}`, { cache: "no-store" });
+      if (!r.ok) return;
+      const v = (await r.json()).v;
+      if (v && v !== APP_VERSION) location.replace(`${location.pathname}?v=${v}`);
+    } catch (e) {}
+  }
   async function load() {
+    checkVersion();
     loadPrices();
     try {
       const r = await fetch(`${DATA_URL}?t=${Date.now()}`, { cache: "no-store" });
