@@ -8,21 +8,28 @@
 <meta name="theme-color" content="#6b4a2f">
 <title>Perhekalenteri</title>
 <link rel="icon" href="data:,">
-<meta name="app-version" content="1ee57e015d">
-<link rel="stylesheet" href="style.css?v=1ee57e015d">
+<meta name="app-version" content="a53e21c008">
+<link rel="stylesheet" href="style.css?v=a53e21c008">
 </head>
 <body>
 <div id="app">
   <header class="top">
     <div class="brand">
-      <span class="brand-title">Perheen viikko</span>
+      <span class="brand-title">Meidän perheen</span>
+      <nav class="view-nav" aria-label="Näkymä">
+        <a href="#paiva" class="view-link is-active" data-view="paiva" id="navPaiva">päivä</a>
+        <span class="view-sep" aria-hidden="true">·</span>
+        <a href="#viikko" class="view-link" data-view="viikko" id="navViikko">viikko</a>
+        <span class="view-sep" aria-hidden="true">·</span>
+        <a href="#kuukausi" class="view-link" data-view="kuukausi" id="navKuukausi">kuukausi</a>
+      </nav>
       <span class="brand-sub" id="brandSub"></span>
     </div>
     <div class="members" id="members"></div>
     <div class="status" id="status"></div>
   </header>
 
-  <main class="grid">
+  <main class="grid" id="dayView">
     <section class="col col-a">
       <div class="card clock">
         <div class="time" id="time">--:--</div>
@@ -60,6 +67,23 @@
       </div>
     </section>
   </main>
+
+  <main class="calview" id="weekView" hidden>
+    <div class="calview-bar">
+      <button type="button" class="back-btn" data-back>Paluu</button>
+      <div class="calview-title" id="weekTitle"></div>
+    </div>
+    <div class="week-grid" id="weekGrid"></div>
+  </main>
+
+  <main class="calview" id="monthView" hidden>
+    <div class="calview-bar">
+      <button type="button" class="back-btn" data-back>Paluu</button>
+      <div class="calview-title" id="monthTitle"></div>
+    </div>
+    <div class="month-grid" id="monthGrid"></div>
+  </main>
+
   <footer class="foot" id="foot"></footer>
 </div>
 <div id="lock" class="lock" hidden>
@@ -71,6 +95,17 @@
     <div id="lockMsg" class="lock-msg"></div>
   </form>
 </div>
-<script src="app.js?v=1ee57e015d"></script>
+<div id="dayPop" class="daypop" hidden>
+  <div class="daypop-card" role="dialog" aria-modal="true" aria-labelledby="dayPopTitle">
+    <button type="button" class="daypop-x" data-daypop-close aria-label="Sulje">×</button>
+    <div class="daypop-head">
+      <div class="daypop-title" id="dayPopTitle"></div>
+      <div class="daypop-meta" id="dayPopMeta"></div>
+    </div>
+    <div class="daypop-body" id="dayPopBody"></div>
+    <button type="button" class="daypop-close" data-daypop-close>Sulje</button>
+  </div>
+</div>
+<script src="app.js?v=a53e21c008"></script>
 </body>
 </html>

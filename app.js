@@ -9,14 +9,17 @@
   const HARD_RELOAD_MS = 6 * 3600 * 1000; // koko sivu 6 h välein
   const NIGHT_FROM = 21, NIGHT_TO = 6;    // yötila klo 21–06
   const STALE_MIN = 180;
+  const VIEW_IDLE_MS = 30 * 1000; // viikko/kuukausi palaa päivään 30 s kuluttua
   const params = new URLSearchParams(location.search);
   const forcedMode = params.get("tila");  // "paiva" | "yo" (testaukseen)
 
   const WD = ["su", "ma", "ti", "ke", "to", "pe", "la"];
   const WD_LONG = ["sunnuntai", "maanantai", "tiistai", "keskiviikko", "torstai", "perjantai", "lauantai"];
   const MON = ["tammikuuta", "helmikuuta", "maaliskuuta", "huhtikuuta", "toukokuuta", "kesäkuuta", "heinäkuuta", "elokuuta", "syyskuuta", "lokakuuta", "marraskuuta", "joulukuuta"];
+  const MON_NOM = ["tammikuu", "helmikuu", "maaliskuu", "huhtikuu", "toukokuu", "kesäkuu", "heinäkuu", "elokuu", "syyskuu", "lokakuu", "marraskuu", "joulukuu"];
 
-  let DATA = null, lastFetchOk = true, lastFetchAt = null, PRICES = null;
+  let DATA = null, lastFetchOk = true, lastFetchAt = null, PRICES = null, FORECAST = null;
+  let currentView = "paiva", idleTimer = null, openDayKey = null;
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -36,6 +39,8 @@
   function addDays(key, n) { const [y, m, d] = key.split("-").map(Number); const t = new Date(Date.UTC(y, m - 1, d + n)); return t.toISOString().slice(0, 10); }
   function keyInfo(key) { const [y, m, d] = key.split("-").map(Number); return { y, m, d, wd: new Date(Date.UTC(y, m - 1, d)).getUTCDay() }; }
   function isoWeek(key) { const [y, m, d] = key.split("-").map(Number); const t = new Date(Date.UTC(y, m - 1, d)); const dn = (t.getUTCDay() + 6) % 7; t.setUTCDate(t.getUTCDate() - dn + 3); const fy = new Date(Date.UTC(t.getUTCFullYear(), 0, 4)); return 1 + Math.round(((t - fy) / 864e5 - 3 + ((fy.getUTCDay() + 6) % 7)) / 7); }
+  function mondayOfIsoWeek(key) { return addDays(key, -((keyInfo(key).wd + 6) % 7)); }
+  const isHolidayEv = (e) => (e.henkilot || []).includes("pyha") || e.kalenteri === "pyha";
   const hm = (date) => { const p = hk(date); return `${String(p.hh).padStart(2, "0")}.${String(p.mm).padStart(2, "0")}`; };
   const shortDate = (key) => { const i = keyInfo(key); return `${WD[i.wd]} ${i.d}.${i.m}.`; };
   function now() { const n = params.get("nyt"); return n ? new Date(n) : new Date(); }
@@ -134,6 +139,38 @@
     try { const r = await fetch(`prices.json?t=${Date.now()}`, { cache: "no-store" }); if (r.ok) PRICES = await r.json(); } catch (e) {}
     renderPrice(now());
   }
+  async function loadForecast() {
+    try { const r = await fetch(`forecast.json?t=${Date.now()}`, { cache: "no-store" }); if (r.ok) FORECAST = await r.json(); } catch (e) {}
+  }
+  function realizedDayAvg(key) {
+    const slots = PRICES?.hinnat || [];
+    if (!slots.length) return null;
+    const step = (PRICES.jakso_min || 15) * 60000;
+    const s = midnight(key).getTime(), e = midnight(addDays(key, 1)).getTime();
+    const vals = [];
+    for (const x of slots) {
+      const a = Date.parse(x.alku);
+      if (Number.isFinite(a) && a >= s && a < e && Number.isFinite(x.c)) vals.push(x.c);
+    }
+    const expect = Math.max(1, Math.round((e - s) / step));
+    if (vals.length < expect * 0.9) return null;
+    return vals.reduce((a, b) => a + b, 0) / vals.length;
+  }
+  function forecastDayAvg(key) {
+    const row = (FORECAST?.paivat || []).find((d) => d.pvm === key);
+    return (row && Number.isFinite(row.ka)) ? row.ka : null;
+  }
+  function dayPriceBadge(key, todayKey, mode) {
+    if (!key || key < todayKey) return "";
+    const real = realizedDayAvg(key);
+    const c = (real != null) ? real : forecastDayAvg(key);
+    if (c == null || !Number.isFinite(c)) return "";
+    const tilde = (real == null) ? "~" : "";
+    const txt = (mode === "today")
+      ? `Sähkö ka ${tilde}${c.toFixed(2).replace(".", ",")} c`
+      : `${tilde}${c.toFixed(1).replace(".", ",")} c`;
+    return `<span class="fc ${priceClass(c)}${real != null ? " spot" : ""}${mode === "today" ? " ka" : ""}">${esc(txt)}</span>`;
+  }
 
   function renderMembers() {
     const keys = Object.keys(DATA?.jasenet || {}).filter((k) => k !== "pyha");
@@ -178,7 +215,7 @@
     const key = hk(n).key;
     const evs = eventsForDay(key);
     const longs = evs.filter((e) => e.long), timed = evs.filter((e) => !e.long);
-    let html = `<div class="card-title">Tänään <small>${esc(shortDate(key))}</small></div><div class="ev-list">`;
+    let html = `<div class="card-title">Tänään <small>${esc(shortDate(key))}</small>${dayPriceBadge(key, key, "today")}</div><div class="ev-list">`;
     for (const e of longs) html += `<div class="banner${e.alustava ? " tent" : ""}" style="background:${evColor(e)}22;border-left:6px solid ${evColor(e)}">${esc(e.otsikko)}<span class="sub">${esc(e.sub || "koko päivä")} · ${esc(evWho(e))}</span></div>`;
     let nowShown = false, shown = 0;
     const MAX = Math.max(2, 7 - longs.length);
@@ -214,10 +251,12 @@
       const pills = items.slice(0, MAXP).map((e) => e.shiftGroup
         ? `<span class="pill" style="border-color:${evColor(e.shiftGroup[0])}">${e.shiftGroup.map((s) => `${badges(s)}<span class="pt">${esc(hm(s.a))}–${esc(hm(s.b))}</span>${puokkari(s)}`).join("&nbsp;&nbsp;")}</span>`
         : e.long
-        ? `<span class="pill span${e.alustava ? " tent" : ""}" style="background:${evColor(e)}">${esc(e.otsikko)}${e.sub ? ` <small style="opacity:.85;font-weight:700">· ${esc(e.sub)}</small>` : ""}</span>`
-        : `<span class="pill${e.alustava ? " tent" : ""}" style="border-color:${evColor(e)}"><span class="pt">${esc(e.time)}</span>${esc(e.otsikko)}</span>`).join("");
+        ? `<span class="pill span${e.alustava ? " tent" : ""}" style="background:${evColor(e)}"><span class="pl">${esc(e.otsikko)}${e.sub ? ` <small style="opacity:.85;font-weight:700">· ${esc(e.sub)}</small>` : ""}</span></span>`
+        : `<span class="pill${e.alustava ? " tent" : ""}" style="border-color:${evColor(e)}"><span class="pt">${esc(e.time)}</span><span class="pl">${esc(e.otsikko)}</span></span>`).join("");
       const extra = items.length - MAXP;
-      html += `<div class="day${info.wd === 0 || info.wd === 6 ? " weekend" : ""}"><div class="dl"><b>${label}</b><span>${info.d}.${info.m}.${wk}${w ? ` ${wIcon(w.koodi, 1)}${deg(w.max)}` : ""}</span></div>
+      const wx = w ? `${wIcon(w.koodi, 1)}<span>${deg(w.max)}</span>` : "";
+      const fc = dayPriceBadge(key, todayKey);
+      html += `<div class="day${info.wd === 0 || info.wd === 6 ? " weekend" : ""}"><div class="dl"><b>${label}</b><span class="dd">${info.d}.${info.m}.${wk}</span>${(wx || fc) ? `<span class="dw">${wx}${fc}</span>` : ""}</div>
         <div class="pills">${pills || '<span class="none">Ei merkintöjä</span>'}${extra > 0 ? `<span class="more">+${extra}</span>` : ""}</div></div>`;
     }
     $("upcoming").innerHTML = html + "</div>";
@@ -283,7 +322,7 @@
       const open = t.kohteet.filter((x) => !x.tehty), done = t.kohteet.filter((x) => x.tehty);
       const items = [...open, ...done].slice(0, 6);
       if (!items.length) html += `<div class="empty">Lista on tyhjä.</div>`;
-      html += items.map((x) => `<div class="todo-item${x.tehty ? " done" : ""}"><span class="box"></span>${esc(x.teksti)}</div>`).join("");
+      html += items.map((x) => `<div class="todo-item${x.tehty ? " done" : ""}"><span class="box"></span><span class="txt">${esc(x.teksti)}</span></div>`).join("");
       if (t.kohteet.length > items.length) html += `<div class="more">+${t.kohteet.length - items.length} muuta</div>`;
     }
     $("todo").innerHTML = html;
@@ -294,11 +333,247 @@
     $("foot").innerHTML = `<span>Lähteet: Google-kalenteri · Open-Meteo (sää) · Kouvolan Aromi14 (ruokalistat) · eVaka (Arjen apuri)${errs.length ? " · virhe: " + esc(errs.join(", ")) : ""}</span><span>Yötila klo ${NIGHT_FROM}–0${NIGHT_TO} · <a href="#" id="forgetLink">unohda salasana</a></span>`;
   }
 
+  function renderWeek(n) {
+    const el = $("weekGrid"), title = $("weekTitle");
+    if (!el || !title) return;
+    const todayKey = hk(n).key;
+    const mon = mondayOfIsoWeek(todayKey);
+    const sun = addDays(mon, 6);
+    const a = keyInfo(mon), b = keyInfo(sun);
+    title.textContent = `Viikko ${isoWeek(todayKey)} · ${a.d}.${a.m}.–${b.d}.${b.m}.${b.y}`;
+    const weather = Object.fromEntries((DATA?.saa?.paivat || []).map((d) => [d.pvm, d]));
+    const MAX = 6;
+    let html = "";
+    for (let i = 0; i < 7; i++) {
+      const key = addDays(mon, i), info = keyInfo(key), evs = eventsForDay(key), w = weather[key];
+      const cls = ["week-day", key === todayKey ? "is-today" : "", key < todayKey ? "is-past" : "",
+        (info.wd === 0 || info.wd === 6) ? "is-weekend" : "", evs.some(isHolidayEv) ? "is-holiday" : ""].filter(Boolean).join(" ");
+      const fc = dayPriceBadge(key, todayKey);
+      const wx = (w || fc) ? `<div class="wd-wx">${w ? `${wIcon(w.koodi, 1)}<span>${deg(w.max)}</span>` : ""}${fc}</div>` : "";
+      const longs = evs.filter((e) => e.long), timed = evs.filter((e) => !e.long);
+      const items = [...longs, ...timed];
+      let list = "";
+      for (const e of items.slice(0, MAX)) {
+        if (e.long) {
+          const sub = e.sub && String(e.sub).includes("päättyy") ? ` <small style="opacity:.8">· ${esc(e.sub)}</small>` : "";
+          list += `<div class="wv-banner${e.alustava ? " tent" : ""}" style="background:${evColor(e)}22;border-left:5px solid ${evColor(e)}">${esc(e.otsikko)}${sub}</div>`;
+        } else {
+          const past = e.b <= n, cur = e.a <= n && e.b > n;
+          const end = (!e.endsAfter && !e.startsBefore) ? `–${hm(e.b)}` : "";
+          list += `<div class="wv-ev${past ? " past" : ""}${cur ? " now" : ""}${e.alustava ? " tent" : ""}"><div class="t">${esc(e.time)}${esc(end)}</div>
+            <div class="body" style="border-color:${evColor(e)}"><span class="title">${badges(e)}${esc(e.otsikko)}</span>${puokkari(e)}<div class="who">${esc(evWho(e))}</div></div></div>`;
+        }
+      }
+      const extra = items.length - MAX;
+      if (extra > 0) list += `<div class="more">+${extra}</div>`;
+      if (!items.length) list += `<div class="none">Ei merkintöjä</div>`;
+      html += `<div class="${cls}" data-day="${key}"><div class="wd-head"><span class="wd-name">${esc(WD[info.wd])}</span><span class="wd-num">${info.d}.</span></div>${wx}<div class="wv-list">${list}</div></div>`;
+    }
+    el.innerHTML = html;
+  }
+
+  function renderMonth(n) {
+    const el = $("monthGrid"), title = $("monthTitle");
+    if (!el || !title) return;
+    const p = hk(n), todayKey = p.key, y = p.y, m = p.m;
+    title.textContent = `${MON_NOM[m - 1].replace(/^./, (x) => x.toUpperCase())} ${y}`;
+    const start = mondayOfIsoWeek(`${y}-${String(m).padStart(2, "0")}-01`);
+    const weather = Object.fromEntries((DATA?.saa?.paivat || []).map((d) => [d.pvm, d]));
+    const MAXP = 3;
+    let html = `<div></div>` + ["ma", "ti", "ke", "to", "pe", "la", "su"].map((s, i) =>
+      `<div class="month-hd${i >= 5 ? " weekend" : ""}">${s}</div>`).join("");
+    for (let r = 0; r < 6; r++) {
+      const rowKey = addDays(start, r * 7);
+      html += `<div class="month-wk">${isoWeek(rowKey)}</div>`;
+      for (let c = 0; c < 7; c++) {
+        const key = addDays(start, r * 7 + c), info = keyInfo(key), evs = eventsForDay(key), w = weather[key];
+        const inMonth = info.m === m;
+        const cls = ["month-cell", inMonth ? "" : "out", key === todayKey ? "is-today" : "",
+          inMonth && key < todayKey ? "is-past" : "", (info.wd === 0 || info.wd === 6) ? "weekend" : "",
+          evs.some(isHolidayEv) ? "is-holiday" : ""].filter(Boolean).join(" ");
+        const wx = w ? `<span class="m-wx">${wIcon(w.koodi, 1)}</span>` : "";
+        const items = [...evs.filter((e) => e.long), ...evs.filter((e) => !e.long && e.hoitovuoro), ...evs.filter((e) => !e.long && !e.hoitovuoro)];
+        const pills = items.slice(0, MAXP).map((e) => {
+          if (e.long) return `<span class="mpill span${e.alustava ? " tent" : ""}" style="background:${evColor(e)}">${esc(e.otsikko)}</span>`;
+          if (e.hoitovuoro) {
+            const mark = e.puokkari === true ? "Puokkari" : e.puokkari === false ? "Ei-puokkari" : esc(e.otsikko);
+            return `<span class="mpill${e.alustava ? " tent" : ""}" style="border-color:${evColor(e)}">${badges(e)}${esc(e.time)} ${mark}</span>`;
+          }
+          return `<span class="mpill${e.alustava ? " tent" : ""}" style="border-color:${evColor(e)}">${esc(e.time)} ${esc(e.otsikko)}</span>`;
+        }).join("");
+        const extra = items.length - MAXP;
+        html += `<div class="${cls}" data-day="${key}"><div class="m-top"><span class="m-date">${info.d}</span>${wx}</div><div class="m-pills">${pills}${extra > 0 ? `<span class="more">+${extra}</span>` : ""}</div></div>`;
+      }
+    }
+    el.innerHTML = html;
+  }
+
+  /* ---------- haetun dataikkunan rajat (ei keksitä tapahtumia) ---------- */
+  function coverageEnd() {
+    const today = hk(now()).key;
+    const keys = [today];
+    for (const d of DATA?.saa?.paivat || []) if (d.pvm) keys.push(d.pvm);
+    for (const e of DATA?.tapahtumat || []) {
+      keys.push(hk(new Date(e.alku)).key);
+      const b = new Date(e.loppu), bk = hk(b).key;
+      keys.push(e.kokopaiva ? addDays(bk, -1) : bk);
+    }
+    for (const l of DATA?.ruokalistat || []) {
+      for (const d of l.paivat || []) if (d.pvm) keys.push(d.pvm);
+    }
+    return keys.sort().at(-1);
+  }
+  function dayHasCoverage(key) {
+    const today = hk(now()).key, end = coverageEnd();
+    if (key >= today && key <= end) return true;
+    if (key < today && eventsForDay(key).length) return true;
+    return false;
+  }
+
+  /* ---------- päivän tarkempi ikkuna ---------- */
+  function evRange(e) {
+    if (e.long) return "";
+    if (e.startsBefore && e.endsAfter) return "koko päivän";
+    if (e.startsBefore) return `→ ${hm(e.b)}`;
+    if (e.endsAfter) return `${hm(e.a)} →`;
+    return `${hm(e.a)}–${hm(e.b)}`;
+  }
+  function renderDayPop(key) {
+    const pop = $("dayPop"), title = $("dayPopTitle"), meta = $("dayPopMeta"), body = $("dayPopBody");
+    if (!pop || !title || !meta || !body) return;
+    const info = keyInfo(key);
+    title.textContent = `${WD_LONG[info.wd].replace(/^./, (x) => x.toUpperCase())} ${info.d}. ${MON[info.m - 1]}`;
+    const evs = eventsForDay(key);
+    const holidays = evs.filter(isHolidayEv);
+    const hol = holidays.map((e) => esc(e.otsikko)).join(" · ");
+    meta.innerHTML = `<span>Viikko ${isoWeek(key)}</span>${hol ? `<span class="holiday">${hol}</span>` : ""}`;
+
+    const w = (DATA?.saa?.paivat || []).find((d) => d.pvm === key);
+    let html = "";
+    const fcPop = dayPriceBadge(key, hk(now()).key);
+    if (w || fcPop) {
+      const rain = (w && w.sade_tn >= 30 && w.sade_mm >= 0.2) ? `<span class="rain">${w.sade_mm.toFixed(1).replace(".", ",")} mm</span>` : "";
+      const wxbit = w ? `${wIcon(w.koodi, 1)}<div><div class="rng">${deg(w.max)} <span>/ ${deg(w.min)}</span></div>
+        <div class="desc">${wText(w.koodi)} ${rain}</div></div>` : "";
+      html += `<div class="dp-wx">${wxbit}${fcPop}</div>`;
+    }
+
+    const items = evs;
+    html += `<div><div class="dp-sec-title">Tapahtumat</div>`;
+    if (!items.length) {
+      html += dayHasCoverage(key)
+        ? `<div class="empty">Ei merkintöjä</div>`
+        : `<div class="empty">Tapahtumia ei vielä haettu tälle päivälle</div>`;
+    } else {
+      html += `<div class="dp-list">`;
+      for (const e of items) {
+        const who = evWho(e);
+        const extra = [who, e.paikka, e.alustava ? "alustava" : ""].filter(Boolean).join(" · ");
+        if (e.long) {
+          html += `<div class="dp-banner${e.alustava ? " tent" : ""}" style="background:${evColor(e)}22;border-left:6px solid ${evColor(e)}">${esc(e.otsikko)}<span class="sub">${esc(e.sub || "koko päivä")}${who ? " · " + esc(who) : ""}</span></div>`;
+        } else {
+          html += `<div class="dp-ev${e.alustava ? " tent" : ""}"><div class="t">${esc(evRange(e))}</div>
+            <div class="body" style="border-color:${evColor(e)}"><div class="title">${badges(e)}${esc(e.otsikko)}${puokkari(e)}</div>
+            <div class="who">${esc(extra)}</div></div></div>`;
+        }
+      }
+      html += `</div>`;
+    }
+    html += `</div>`;
+
+    const SHOW = ["Aamupala", "Lounas", "Välipala"];
+    const menus = [];
+    for (const l of DATA?.ruokalistat || []) {
+      const day = (l.paivat || []).find((d) => d.pvm === key);
+      const meals = SHOW.map((n) => day?.ateriat?.find((x) => x.ateria.trim().toLowerCase() === n.toLowerCase())).filter(Boolean);
+      if (meals.length) menus.push({ l, meals });
+    }
+    if (menus.length) {
+      html += `<div><div class="dp-sec-title">Ruokalista</div>`;
+      for (const { l, meals } of menus) {
+        const kids = (l.henkilot || []).map(member);
+        html += `<div class="dp-menu-head">${kids.map((m) => `<span class="avatar" style="background:${m.vari}">${esc(m.tunnus)}</span>`).join("")}
+          <span>${esc(kids.map((m) => m.nimi).join(" ja "))}${l.otsikko ? " · " + esc(l.otsikko) : ""}</span></div>`;
+        html += meals.map((m) => {
+          const [main, ...sides] = m.ruoat.map((r) => r.nimi);
+          const lunch = /^lounas$/i.test(m.ateria.trim());
+          return `<div class="dp-meal${lunch ? " lunch" : ""}"><div class="mn">${esc(m.ateria.trim())}</div><div><span class="main">${esc(main)}</span>${sides.length ? `<span class="side">, ${esc(sides.join(", "))}</span>` : ""}</div></div>`;
+        }).join("");
+      }
+      html += `</div>`;
+    }
+
+    const r = DATA?.muistutukset;
+    const rems = (r && r.tila === "ok") ? (r.kohteet || []).filter((x) => x.pvm === key) : [];
+    if (rems.length) {
+      html += `<div><div class="dp-sec-title">Muistutukset</div>`;
+      for (const x of rems) {
+        const kid = x.lapsi ? member(x.lapsi.toLowerCase()) : null;
+        html += `<div class="rem"><div class="d">${esc(shortDate(key))}</div>
+          <div><div class="x">${esc(x.otsikko)}</div><div class="src"><i style="background:${kid ? kid.vari : "var(--ink-3)"}"></i>${esc(x.lahde || "")}${kid ? " · " + esc(kid.nimi) : ""}</div></div></div>`;
+      }
+      html += `</div>`;
+    }
+
+    body.innerHTML = html;
+  }
+  function openDayPop(key) {
+    if (!key) return;
+    openDayKey = key;
+    renderDayPop(key);
+    const pop = $("dayPop");
+    if (pop) pop.hidden = false;
+    bumpIdle();
+  }
+  function closeDayPop() {
+    openDayKey = null;
+    const pop = $("dayPop");
+    if (pop) pop.hidden = true;
+  }
+
+  /* ---------- näkymät (päivä / viikko / kuukausi) ja 30 s paluu ---------- */
+  function viewFromHash() {
+    const h = (location.hash || "").replace(/^#/, "").toLowerCase();
+    return (h === "viikko" || h === "kuukausi") ? h : "paiva";
+  }
+  function stopIdleTimer() { if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; } }
+  function startIdleTimer() { stopIdleTimer(); idleTimer = setTimeout(() => setView("paiva"), VIEW_IDLE_MS); }
+  function bumpIdle() { if (currentView !== "paiva") startIdleTimer(); }
+  function setView(view, fromHash) {
+    if (view !== "viikko" && view !== "kuukausi") view = "paiva";
+    if (view === "paiva") closeDayPop();
+    currentView = view;
+    const want = view === "paiva" ? "" : "#" + view;
+    if (!fromHash && (location.hash || "") !== want) {
+      history.replaceState(null, "", location.pathname + location.search + want);
+    }
+    const day = $("dayView"), week = $("weekView"), month = $("monthView"), foot = $("foot");
+    if (day) day.hidden = view !== "paiva";
+    if (week) week.hidden = view !== "viikko";
+    if (month) month.hidden = view !== "kuukausi";
+    if (foot) foot.hidden = view !== "paiva";
+    document.querySelectorAll(".view-link").forEach((a) => {
+      const on = a.dataset.view === view;
+      a.classList.toggle("is-active", on);
+      if (on) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
+    });
+    if (view !== "paiva") startIdleTimer(); else stopIdleTimer();
+    if (DATA) {
+      const nowV = now();
+      if (view === "viikko") renderWeek(nowV);
+      if (view === "kuukausi") renderMonth(nowV);
+      if (openDayKey) renderDayPop(openDayKey);
+    }
+  }
+
   function renderAll() {
     const n = now();
     renderHeader(n); renderMembers(); renderStatus(n);
     if (!DATA) return;
     renderWeather(n); renderToday(n); renderUpcoming(n); renderMenu(n); renderReminders(n); renderTodo(); renderFoot();
+    if (currentView === "viikko") renderWeek(n);
+    if (currentView === "kuukausi") renderMonth(n);
+    if (openDayKey) renderDayPop(openDayKey);
   }
 
   /* ---------- salaus: AES-GCM + PBKDF2 (WebCrypto) ---------- */
@@ -346,12 +621,12 @@
       const r = await fetch(`version.json?t=${Date.now()}`, { cache: "no-store" });
       if (!r.ok) return;
       const v = (await r.json()).v;
-      if (v && v !== APP_VERSION) location.replace(`${location.pathname}?v=${v}`);
+      if (v && v !== APP_VERSION) location.replace(`${location.pathname}?v=${v}${location.hash}`);
     } catch (e) {}
   }
   async function load() {
     checkVersion();
-    loadPrices();
+    const meta = Promise.all([loadPrices(), loadForecast()]);
     try {
       const r = await fetch(`${DATA_URL}?t=${Date.now()}`, { cache: "no-store" });
       if (!r.ok) throw new Error(r.status);
@@ -369,13 +644,35 @@
       if (DATA) lastFetchOk = !!DATA && lastFetchOk; else lastFetchOk = false;
       if (!DATA) lastFetchOk = false;
     }
+    await meta;
     renderAll();
   }
   $("lockForm").addEventListener("submit", unlock);
-  document.addEventListener("click", (e) => { if (e.target && e.target.id === "forgetLink") { e.preventDefault(); if (confirm("Unohdetaanko tallennettu salasana tältä laitteelta?")) forget(); } });
+  document.addEventListener("click", (e) => {
+    if (e.target && e.target.id === "forgetLink") { e.preventDefault(); if (confirm("Unohdetaanko tallennettu salasana tältä laitteelta?")) forget(); return; }
+    if (e.target && e.target.closest && e.target.closest("[data-daypop-close]")) { e.preventDefault(); closeDayPop(); return; }
+    if (e.target && e.target.id === "dayPop") { closeDayPop(); return; }
+    if (e.target && e.target.closest && e.target.closest("#dayPop")) return;
+    const cell = e.target.closest && e.target.closest("[data-day]");
+    if (cell && (currentView === "viikko" || currentView === "kuukausi")) { openDayPop(cell.dataset.day); return; }
+    if (e.target && e.target.closest && e.target.closest("[data-back]")) { e.preventDefault(); setView("paiva"); }
+  });
+  document.querySelector(".view-nav")?.addEventListener("click", (e) => {
+    const a = e.target.closest(".view-link");
+    if (!a) return;
+    e.preventDefault();
+    setView(a.dataset.view);
+  });
+  window.addEventListener("hashchange", () => setView(viewFromHash(), true));
+  document.addEventListener("pointerdown", bumpIdle, true);
+  document.addEventListener("keydown", (e) => {
+    bumpIdle();
+    if (e.key === "Escape" && openDayKey) { e.preventDefault(); closeDayPop(); }
+  }, true);
 
   // Kello tikittää sekunnin välein, muu näkymä päivittyy minuutin välein, data 5 min välein.
   renderHeader(now());
+  setView(viewFromHash(), true);
   load();
   setInterval(() => renderHeader(now()), 1000);
   setInterval(renderAll, 60 * 1000);
