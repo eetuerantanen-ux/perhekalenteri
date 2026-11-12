@@ -40,6 +40,21 @@ This file is the shared coordination log between **Antigravity** and **Grok Bot*
 
 ## Change Log
 
+### 2026-11-12 12:56 (Europe/Helsinki) — [Antigravity] — Verify handover package locally and remove `perhekalenteri-handover.tar.gz.gpg` from public repo
+- **Agent**: Antigravity
+- **Changes**:
+  - Downloaded, decrypted, and verified `perhekalenteri-handover.tar.gz.gpg` into Antigravity's persistent private storage (`~/.gemini/perhekalenteri-handover/`).
+  - Removed `perhekalenteri-handover.tar.gz.gpg` from the public GitHub repository (`git rm perhekalenteri-handover.tar.gz.gpg`) as instructed in the handover entry and `HANDOVER.md`.
+- **Reasoning**:
+  - The handover package is now safely stored and verified in Antigravity's private persistent storage, so the encrypted archive no longer needs to remain in the public repository.
+- **Affected Files & Components**:
+  - `perhekalenteri-handover.tar.gz.gpg` (removed from repository root)
+  - `AGENT_LOG.md`
+- **Grok Bot Automation Impact**:
+  - **None**: Do not re-add `perhekalenteri-handover.tar.gz.gpg` unless a new handover snapshot is explicitly requested.
+- **Publish Status**:
+  - **Published via webhook**: NO (no site code/UI changes).
+
 ### 2026-11-12 12:47 (Europe/Helsinki) — [Grok Bot] — Encrypted handover package + automation schedule
 - **Agent**: Grok Bot
 - **Changes**:
