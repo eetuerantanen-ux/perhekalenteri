@@ -23,13 +23,14 @@ This file is the shared coordination log between **Antigravity** and **Grok Bot*
 
 | Routine | Run by | Schedule | Exact steps / commands |
 |---|---|---|---|
-| Perhekalenterin päivitys | Tekninen automaatiobotti (Grok Bot) | every 30 min, 06:00–22:00 (and on webhook trigger) | sync `publish/` from `origin/main` → if `publish/hoitovuorot.enc.json` exists and is newer than `shared/hoitovuorot.json`, decrypt to `shared/hoitovuorot.json` (`python3 publish/fetch-evaka.py --out-shifts publish/hoitovuorot.enc.json --decrypt-to shared/hoitovuorot.json`, keeping Arjen apuri's `shared/hoitovuorot.json` as fallback) → fetch 4 Google calendars → `python3 collect.py` → `bash publish.sh` |
+| Perhekalenterin päivitys | Tekninen automaatiobotti (Grok Bot) | every 30 min, 06:00–22:00 (and on webhook trigger) | sync `publish/` from `origin/main` → decrypt `publish/hoitovuorot.enc.json` (`fetch-evaka.py --decrypt-to shared/hoitovuorot.json`), `publish/muistilista.enc.json` (`fetch-keep.py --decrypt-to shared/muistilista.json`), and `publish/ruokalistat.enc.json` (`fetch-menus.py --decrypt-to shared/ruokalistat.json`) → fetch 4 Google calendars → `python3 collect.py` → `bash publish.sh` |
 | Pörssisähkön hinnat | Tekninen automaatiobotti (Grok Bot) | daily 16:00 | `python3 fetch-prices.py` (internally runs `python3 fetch-forecast.py --out publish/forecast.json`) |
-| **Muistilista (Google Keep)** | **Raspberry Pi (`fetch-keep.py`) + Arjen apuri fallback** | **Hourly 07:00–21:00 on Pi** | Connects to Google Keep (`gkeepapi` with `KEEP_EMAIL` + `KEEP_MASTER_TOKEN`), reads note `"Muistilista"` (`[{teksti, tehty}]`), compares against `.publish-state/muistilista.sent.json` / `muistilista.enc.json`, and if changed: encrypts with `AES-256-GCM` (`PBKDF2-SHA256`, 1,000,000 iterations, `FAMILY_PLANNER_PASSWORD`) to **`muistilista.enc.json`**, commits & pushes `muistilista.enc.json` to `origin/main`, and calls Grok Bot's publish webhook (`muistilista_enc` + `muistilista` + `diff` in POST JSON body). `publish.sh` decrypts `muistilista.enc.json` into `shared/muistilista.json` (`python3 publish/fetch-keep.py --out-todo publish/muistilista.enc.json --decrypt-to shared/muistilista.json`, newer source wins vs. Arjen apuri fallback). Also supports `--add`, `--remove`, `--check`, `--uncheck` for two-way editing |
+| **Ruokalistat (Aromi14)** | **Raspberry Pi (`fetch-menus.py`)** | **Tuesdays at 14:00 (`0 14 * * 2`) on Pi** | Fetches both **Lehvätien päiväkoti** (`Lehvatienpk`, `rooli="arki"`) and **Jaakonpuiston päiväkoti** (`Jaakonpuistonpk`, `rooli="vuoro"`) from Kouvolan Aromi14 eMenus for the current + next month, compares upcoming days (`pvm >= today`) against `.publish-state/ruokalistat.sent.json` / `ruokalistat.enc.json`, and **only when new or updated menu items appear in the coming weeks**: encrypts with `AES-256-GCM` (`PBKDF2-SHA256`, 1,000,000 iterations, `FAMILY_PLANNER_PASSWORD`) to **`ruokalistat.enc.json`**, commits & pushes `ruokalistat.enc.json` to `origin/main`, and calls Grok Bot's publish webhook. `publish.sh` decrypts `publish/ruokalistat.enc.json` into `shared/ruokalistat.json`, and `collect.py` reads `shared/ruokalistat.json` instead of polling Aromi14 every 30 minutes |
+| **Muistilista (Google Keep)** | **Raspberry Pi (`fetch-keep.py`) + Arjen apuri fallback** | **Hourly 07:00–21:00 (`0 7-21 * * *`) on Pi** | Connects to Google Keep (`gkeepapi` with `KEEP_EMAIL` + `KEEP_MASTER_TOKEN`), reads note `"Muistilista"` (`[{teksti, tehty}]`), compares against `.publish-state/muistilista.sent.json` / `muistilista.enc.json`, and if changed: encrypts with `AES-256-GCM` (`PBKDF2-SHA256`, 1,000,000 iterations, `FAMILY_PLANNER_PASSWORD`) to **`muistilista.enc.json`**, commits & pushes `muistilista.enc.json` to `origin/main`, and calls Grok Bot's publish webhook (`muistilista_enc` + `muistilista` + `diff` in POST JSON body). `publish.sh` decrypts `muistilista.enc.json` into `shared/muistilista.json` (`python3 publish/fetch-keep.py --out-todo publish/muistilista.enc.json --decrypt-to shared/muistilista.json`, newer source wins vs. Arjen apuri fallback). Also supports `--add`, `--remove`, `--check`, `--uncheck` for two-way editing |
 | Muistutukset (eVaka) | Arjen apuri (Grok Bot) | hourly on weekdays 07:00–19:00 | writes `shared/muistutukset.json` (eVaka, read-only; fields `otsikko`, `pvm`, `lapsi`, `lahde`) |
 | Muistutukset (email) | Arjen apuri (Grok Bot) | hourly 08:00–21:00 | appends to `shared/muistutukset.json` from `eetu.org` email (`lahde="sähköposti"`) |
-| **Hoitovuorot (eVaka)** | **Raspberry Pi (`fetch-evaka.py`) + Arjen apuri fallback** | **Scheduled cron on Pi** | Logs into `varhaiskasvatus.kouvola.fi` citizen API (`EVAKA_USERNAME` + `EVAKA_PASSWORD`), fetches 2-month care shifts (`[{lapsi, pvm, alku, loppu}]`), compares against `.publish-state/hoitovuorot.sent.json` / `hoitovuorot.enc.json`, and if changed: encrypts with `AES-256-GCM` (`PBKDF2-SHA256`, 1,000,000 iterations, `FAMILY_PLANNER_PASSWORD`) to **`hoitovuorot.enc.json`**, commits & pushes `hoitovuorot.enc.json` to `origin/main`, and calls Grok Bot's publish webhook (`hoitovuorot_enc` + `hoitovuorot` + `diff` in POST JSON body). `publish.sh` decrypts `hoitovuorot.enc.json` into `shared/hoitovuorot.json` (newer source wins vs. Arjen apuri fallback) |
-| Antigravity / Pi julkaisu (webhook) | Koodaribotti (Grok Bot) | on demand | webhook triggers `publish.sh` (decrypts `hoitovuorot.enc.json` & `muistilista.enc.json` → `shared/` → `collect.py` → `data.enc.json`) |
+| **Hoitovuorot (eVaka)** | **Raspberry Pi (`fetch-evaka.py`) + Arjen apuri fallback** | **Daily at 07:00, 14:00, and 19:00 (`0 7,14,19 * * *`) on Pi** | Logs into `varhaiskasvatus.kouvola.fi` citizen API (`EVAKA_USERNAME` + `EVAKA_PASSWORD`), fetches 2-month care shifts (`[{lapsi, pvm, alku, loppu}]`), compares against `.publish-state/hoitovuorot.sent.json` / `hoitovuorot.enc.json`, and if changed: encrypts with `AES-256-GCM` (`PBKDF2-SHA256`, 1,000,000 iterations, `FAMILY_PLANNER_PASSWORD`) to **`hoitovuorot.enc.json`**, commits & pushes `hoitovuorot.enc.json` to `origin/main`, and calls Grok Bot's publish webhook (`hoitovuorot_enc` + `hoitovuorot` + `diff` in POST JSON body). `publish.sh` decrypts `hoitovuorot.enc.json` into `shared/hoitovuorot.json` (newer source wins vs. Arjen apuri fallback) |
+| Antigravity / Pi julkaisu (webhook) | Koodaribotti (Grok Bot) | on demand | webhook triggers `publish.sh` (decrypts `hoitovuorot.enc.json`, `muistilista.enc.json`, & `ruokalistat.enc.json` → `shared/` → `collect.py` → `data.enc.json`) |
 | Tablet version check | tablet browser | data every 5 min; full reload every 6 h | `app.js checkVersion()` fetches `version.json` and reloads when the version changes |
 
 ---
@@ -55,29 +56,39 @@ This file is the shared coordination log between **Antigravity** and **Grok Bot*
 
 ## Change Log
 
-### 2026-11-12 22:56 (Europe/Helsinki) — [Antigravity] — Activate Raspberry Pi `fetch-keep.py` (`muistilista.enc.json`) + add weekly Tuesday 14:00 `fetch-menus.py` (`ruokalistat.enc.json`)
+### 2026-11-12 23:14 (Europe/Helsinki) — [Antigravity] — Move daycare food menu fetching (`Lehvätien päiväkoti` & `Jaakonpuiston päiväkoti`) to weekly Tuesday 14:00 Raspberry Pi job (`fetch-menus.py` -> `ruokalistat.enc.json`) & activate `fetch-keep.py`
 - **Agent**: Antigravity
 - **Changes**:
+  - **Added `fetch-menus.py` & weekly Tuesday 14:00 cron (`0 14 * * 2`) on Raspberry Pi**:
+    1. Fetches both **Lehvätien päiväkoti** (`Lehvatienpk`, id `ad8a057f-2aee-4403-b178-205c8e7b20e2`, `rooli: "arki"` for regular weekdays) and **Jaakonpuiston päiväkoti** (`Jaakonpuistonpk`, id `fd6b518d-6673-4361-a576-ece9efb81b62`, `rooli: "vuoro"` for weekends, public holidays, and evening/overnight shifts) from Kouvolan Aromi14 eMenus for the current + next month (`menu_window(today)`), using the exact schema expected by `collect.py` and `app.js`.
+    2. Compares upcoming days (`pvm >= today`) against `.publish-state/ruokalistat.sent.json` / `ruokalistat.enc.json`. **Only when new or updated menu items appear in the coming weeks** does it encrypt the list into **`ruokalistat.enc.json`** (`AES-256-GCM`, `PBKDF2-SHA256`, 1,000,000 iterations, `FAMILY_PLANNER_PASSWORD`), commit & push `ruokalistat.enc.json` to `origin/main`, and trigger the publish webhook.
+    3. Includes `--decrypt` and `--decrypt-to shared/ruokalistat.json` flags using Python stdlib + OpenSSL `libcrypto`.
+    4. Ran initial live fetch & push on the Raspberry Pi (`Lehvatienpk: 30 tulevaa pv; Jaakonpuistonpk: 46 tulevaa pv` -> `ruokalistat.enc.json` committed and pushed to `origin/main`).
   - **Activated `fetch-keep.py` on Raspberry Pi (`0 7-21 * * *`)**:
-    1. Added compatibility in `fetch-keep.py` for `gkeepapi 0.14.2` on Debian 11 Python 3.9 (`keep.resume(...)` fallback when `keep.authenticate` is absent, plus safe `WebLink._load` handling for Keep notes with link previews missing optional `description`/`title` fields).
-    2. Configured `KEEP_MASTER_TOKEN` in `/home/pi/perhekalenteri/secrets.env`, verified live Google Keep `"Muistilista"` sync, and pushed initial encrypted `muistilista.enc.json` to `origin/main`.
-  - **Added `fetch-menus.py` for weekly daycare menu updates (`0 14 * * 2` — Tuesdays at 14:00)**:
-    1. Fetches both **Lehvätien päiväkoti** (`Lehvatienpk`, `rooli: "arki"`) and **Jaakonpuiston päiväkoti** (`Jaakonpuistonpk`, `rooli: "vuoro"`) from Kouvolan Aromi14 eMenus for the current + next month (`menu_window(today)`).
-    2. Compares upcoming days (`pvm >= today`) against `.publish-state/ruokalistat.sent.json` / `ruokalistat.enc.json` and **only commits & pushes `ruokalistat.enc.json` (`AES-256-GCM`, `PBKDF2-SHA256`, 1,000,000 iterations) when new or updated menu items appear in the coming weeks**.
-    3. Includes `--decrypt` and `--decrypt-to shared/ruokalistat.json` flags using stdlib + OpenSSL `libcrypto`.
+    1. Added `gkeepapi 0.14.2` (Python 3.9) compatibility (`keep.resume(...)` fallback + safe `WebLink._load` handling).
+    2. Configured `KEEP_MASTER_TOKEN` in `/home/pi/perhekalenteri/secrets.env` and pushed initial encrypted `muistilista.enc.json` to `origin/main`.
   - **Failure Alerting (`run_evaka_cron.py`)**:
-    - All three Raspberry Pi cron jobs (`evaka` at `0 7,14,19 * * *`, `keep` at `0 7-21 * * *`, and `menus` at `0 14 * * 2`) are wrapped with per-job failure tracking and send an email alert via `mail.gandi.net:465` (`From: eetu@eetu.org`, `To: eetu.e.rantanen@gmail.com`) if a job fails 3 times in a row.
+    - Wrapped all three Raspberry Pi cron jobs (`evaka` at `0 7,14,19 * * *`, `keep` at `0 7-21 * * *`, and `menus` at `0 14 * * 2`) with per-job failure tracking and Gandi SMTP email alerts (`mail.gandi.net:465`, `From: eetu@eetu.org`, `To: eetu.e.rantanen@gmail.com`) if any job fails 3 times in a row.
+- **Reasoning**:
+  - Daycare food menus only change when new weekly/monthly menus are published, so polling Aromi14 every 30 minutes is unnecessary. Checking once a week on Tuesdays at 14:00 on the Raspberry Pi and updating `ruokalistat.enc.json` only when upcoming weeks have new items eliminates redundant requests while keeping both `Lehvätien päiväkoti` (`arki`) and `Jaakonpuiston päiväkoti` (`vuoro`) menus up to date.
 - **Affected Files & Components**:
+  - `fetch-menus.py` (new weekly Aromi14 menu fetcher)
+  - `ruokalistat.enc.json` (initial encrypted menu data in repo root)
   - `fetch-keep.py` (`gkeepapi 0.14.2` compatibility)
-  - `fetch-menus.py` (new weekly Aromi14 menu fetcher for Lehvätien & Jaakonpuiston päiväkoti)
-  - `muistilista.enc.json`, `ruokalistat.enc.json`
-  - `.gitignore`, `AGENT_LOG.md`
+  - `muistilista.enc.json` (initial encrypted todo list in repo root)
+  - `.gitignore` (`ruokalistat.json` added), `AGENT_LOG.md`
 - **Grok Bot Automation Impact**:
-  - **Recommended (`publish.sh` / `collect.py`)**:
-    - Decrypt `publish/muistilista.enc.json` -> `shared/muistilista.json` (`python3 publish/fetch-keep.py --out-todo publish/muistilista.enc.json --decrypt-to shared/muistilista.json`) before `collect.py`.
-    - Optionally decrypt `publish/ruokalistat.enc.json` -> `shared/ruokalistat.json` (`python3 publish/fetch-menus.py --out-menus publish/ruokalistat.enc.json --decrypt-to shared/ruokalistat.json`) in `publish.sh` and read `shared/ruokalistat.json` in `collect.py` (falling back to live Aromi14 fetch if missing) so `collect.py` doesn't need to poll Aromi14 every 30 minutes.
+  - **Required (`publish.sh` & `collect.py` — Stop polling Aromi14 in `collect.py`)**:
+    1. In `publish.sh` (before running `collect.py`), decrypt `publish/ruokalistat.enc.json` into `shared/ruokalistat.json` (alongside `hoitovuorot.enc.json` and `muistilista.enc.json`):
+       ```bash
+       if [ -f "$PUB/ruokalistat.enc.json" ]; then
+         python3 "$PUB/fetch-menus.py" --out-menus "$PUB/ruokalistat.enc.json" --decrypt-to "$ROOT/shared/ruokalistat.json"
+       fi
+       ```
+    2. In `collect.py`, update `menus(today)` to read `shared/ruokalistat.json` (decrypted from the Raspberry Pi's `ruokalistat.enc.json`) instead of fetching live from Aromi14 on every 30-minute run (keeping live Aromi14 fetching only as a fallback if `shared/ruokalistat.json` is missing).
+    3. Add `ruokalistat.json` to `publish.sh`'s `.gitignore` heredoc.
 - **Publish Status**:
-  - **Published via webhook**: NO (Raspberry Pi automation & encrypted data files pushed to `origin/main`).
+  - **Published via webhook**: NO (Raspberry Pi automation scripts, `muistilista.enc.json`, `ruokalistat.enc.json`, and `AGENT_LOG.md` pushed to `origin/main`).
 
 ### 2026-11-12 22:11 (Europe/Helsinki) — [Antigravity] — Add `fetch-keep.py` for Google Keep `Muistilista` automation (`muistilista.enc.json` + webhook + two-way edit support)
 - **Agent**: Antigravity
