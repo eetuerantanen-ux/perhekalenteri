@@ -1,22 +1,31 @@
 #!/usr/bin/env python3
-"""Hakee eVakan hoitovuorot (ja saapuneet viestit/tiedotteet) suoraan eVakan JSON-rajapinnasta
-heikolla tunnistautumisella (sähköposti + salasana) ilman selainta.
+"""Hakee eVakan hoitovuorot (ja valinnaisesti saapuneet viestit/tiedotteet) suoraan eVakan
+JSON-rajapinnasta heikolla tunnistautumisella (sähköposti + salasana) ilman selainta.
 
-Jos hoitovuoroissa on muutoksia tai uusia vuoroja (tai annetaan --force-webhook),
-lähettää päivitetyt vuorot ja muutoserittelyn (diff) webhookilla Grok Botille.
+Toimintatila (oletus):
+  1. Lukee nykyisen hoitovuorot.json-tiedoston vertailupohjaksi.
+  2. Hakee eVakasta hoitovuorot 2 kk kalenteri-ikkunalle.
+  3. Jos vuoroissa on muutoksia tai uusia vuoroja:
+     a) OLETUS (git + webhook): Kirjoittaa hoitovuorot.json, commitoi ja pushaa sen
+        GitHub-repoon (origin/main), ja kutsuu sen jälkeen Grok Botin julkaisu-webhookia.
+     b) VARATILA (--webhook-only / --no-git-commit): Ei tee git-committia, vaan lähettää
+        muuttuneet vuorot suoraan webhookin JSON-payloadissa Grok Botille (sekä lähettää
+        saman JSON-payloadin aina myös oletustilassa webhook-kutsun mukana varalta).
 
 Kirjoittaa:
-  * shared/hoitovuorot.json       ([{lapsi, pvm, alku, loppu}])
-  * shared/.hoitovuorot.json.sent.json (viimeksi webhookilla onnistuneesti lähetetty tila)
-  * raw/evaka_messages.json       (viimeisimmät viestit ja tiedotteet, ellei --no-messages)
+  * hoitovuorot.json                  ([{lapsi, pvm, alku, loppu}])
+  * shared/hoitovuorot.json           (päivitetään myös automaattisesti, jos shared/-kansio on olemassa)
+  * .publish-state/hoitovuorot.sent.json (viimeksi synkattu tila, gitignorettu)
+  * raw/evaka_messages.json           (viimeisimmät viestit, jos --with-messages annetaan)
 
 Tunnukset ja webhook-asetukset luetaan ympäristömuuttujista tai tiedostosta secrets.env:
   * EVAKA_USERNAME      (pakollinen)
   * EVAKA_PASSWORD      (pakollinen)
-  * EVAKA_WEBHOOK_URL   (valinnainen, tai GROK_WEBHOOK_URL)
-  * EVAKA_WEBHOOK_KEY   (valinnainen, tai GROK_WEBHOOK_KEY)
+  * GROK_WEBHOOK_URL    (tai EVAKA_WEBHOOK_URL / WEBHOOK_URL)
+  * GROK_WEBHOOK_KEY    (tai EVAKA_WEBHOOK_KEY / WEBHOOK_KEY)
+  * GITHUB_TOKEN        (valinnainen; käytetään git push -tunnistautumiseen, jos asetettu)
 """
-import argparse, datetime as dt, http.cookiejar, json, os, sys, urllib.error, urllib.parse, urllib.request
+import argparse, base64, datetime as dt, http.cookiejar, json, os, subprocess, sys, urllib.error, urllib.parse, urllib.request
 from zoneinfo import ZoneInfo
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -203,6 +212,69 @@ def fetch_messages(client, page_size=20):
     return {"haettu": dt.datetime.now(TZ).isoformat(timespec="seconds"), "ketjut": threads}
 
 
+def run_git(repo_dir, args, github_token=None, check=True):
+    cmd = ["git", "-C", repo_dir]
+    if github_token:
+        basic = base64.b64encode(f"x-access-token:{github_token}".encode("utf-8")).decode("ascii")
+        cmd += ["-c", f"http.https://github.com/.extraheader=AUTHORIZATION: basic {basic}"]
+    cmd += args
+    return subprocess.run(cmd, capture_output=True, text=True, check=check)
+
+
+def is_git_repo(repo_dir):
+    try:
+        r = run_git(repo_dir, ["rev-parse", "--is-inside-work-tree"], check=False)
+        return r.returncode == 0 and r.stdout.strip() == "true"
+    except Exception:
+        return False
+
+
+def git_sync_before_read(repo_dir, github_token=None):
+    """Päivittää paikallisen repon origin/mainista ennen vertailua, jotta vertailupohja on tuore."""
+    if not is_git_repo(repo_dir):
+        return
+    run_git(repo_dir, ["fetch", "-q", "origin", "main"], github_token=github_token, check=False)
+    run_git(repo_dir, ["rebase", "-q", "--autostash", "origin/main"], github_token=github_token, check=False)
+
+
+def git_commit_and_push_shifts(repo_dir, shifts_file, github_token=None):
+    """Commitoi ja pushaa hoitovuorot.json-tiedoston origin/mainiin (max 3 yritystä rebasella)."""
+    if not is_git_repo(repo_dir):
+        raise RuntimeError(f"Hakemisto {repo_dir} ei ole git-repo")
+
+    rel_path = os.path.relpath(os.path.abspath(shifts_file), repo_dir)
+    git_name = os.environ.get("GIT_NAME", "eetuerantanen-ux")
+    git_email = os.environ.get("GIT_EMAIL", "239039043+eetuerantanen-ux@users.noreply.github.com")
+
+    run_git(repo_dir, ["add", "--", rel_path])
+    diff_chk = run_git(repo_dir, ["diff", "--cached", "--quiet", "--", rel_path], check=False)
+    if diff_chk.returncode == 0:
+        return False  # Ei uutta commitoitavaa gitissä
+
+    stamp = dt.datetime.now(TZ).strftime("%Y-%m-%d %H:%M")
+    run_git(
+        repo_dir,
+        ["-c", f"user.name={git_name}", "-c", f"user.email={git_email}", "commit", "-q", "-m", f"Hoitovuorot {stamp}"],
+    )
+
+    for attempt in range(1, 4):
+        push_res = run_git(repo_dir, ["push", "-q", "origin", "HEAD:main"], github_token=github_token, check=False)
+        if push_res.returncode == 0:
+            return True
+        # Jos push epäonnistui ilman GITHUB_TOKENia mutta token löytyy ympäristöstä, kokeillaan tokenilla
+        if not github_token and os.environ.get("GITHUB_TOKEN"):
+            github_token = os.environ.get("GITHUB_TOKEN")
+            push_res = run_git(repo_dir, ["push", "-q", "origin", "HEAD:main"], github_token=github_token, check=False)
+            if push_res.returncode == 0:
+                return True
+        run_git(repo_dir, ["fetch", "-q", "origin", "main"], github_token=github_token, check=False)
+        rb = run_git(repo_dir, ["rebase", "-q", "origin/main"], github_token=github_token, check=False)
+        if rb.returncode != 0:
+            run_git(repo_dir, ["rebase", "--abort"], check=False)
+            raise RuntimeError(f"git rebase origin/main epäonnistui: {rb.stderr.strip()}")
+    raise RuntimeError(f"git push origin HEAD:main epäonnistui 3 yrityksellä: {push_res.stderr.strip()}")
+
+
 def send_webhook(url, key, payload, timeout=25):
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     headers = {
@@ -220,25 +292,32 @@ def send_webhook(url, key, payload, timeout=25):
         return status, resp_body
 
 
-def default_state_path(out_shifts_path):
-    d = os.path.dirname(os.path.abspath(out_shifts_path))
-    b = os.path.basename(out_shifts_path)
-    return os.path.join(d, f".{b}.sent.json")
+def default_shifts_path():
+    # Oletuksena repon juuren hoitovuorot.json (jotta git commit & push toimii suoraan)
+    return os.path.join(ROOT, "hoitovuorot.json")
+
+
+def default_state_path():
+    # .publish-state/ on .gitignoressa, joten tilatiedosto ei koskaan päädy vahingossa git-committiin
+    return os.path.join(ROOT, ".publish-state", "hoitovuorot.sent.json")
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Hae eVakan hoitovuorot ja lähetä muutokset webhookilla.")
+    ap = argparse.ArgumentParser(description="Hae eVakan hoitovuorot, commitoi muutokset gitiin ja kutsu webhookia.")
     ap.add_argument("--from-date", help="Alkupäivä YYYY-MM-DD (oletus: kuluvan kuun ruudukon alku)")
     ap.add_argument("--to-date", help="Loppupäivä YYYY-MM-DD (oletus: seuraavan kuun ruudukon loppu)")
-    ap.add_argument("--out-shifts", default=os.path.join(ROOT, "shared", "hoitovuorot.json"))
-    ap.add_argument("--state-file", help="Tiedosto johon tallennetaan viimeksi webhookilla lähetetyt vuorot")
+    ap.add_argument("--out-shifts", default=default_shifts_path(), help="Polku hoitovuorot.json-tiedostoon (oletus: ./hoitovuorot.json)")
+    ap.add_argument("--state-file", default=default_state_path(), help="Tiedosto johon tallennetaan viimeksi synkattu tila")
     ap.add_argument("--out-messages", default=os.path.join(ROOT, "raw", "evaka_messages.json"))
-    ap.add_argument("--no-messages", action="store_true", help="Älä hae viestejä")
-    ap.add_argument("--webhook-url", help="Webhook-osoite (oletus: EVAKA_WEBHOOK_URL tai GROK_WEBHOOK_URL)")
-    ap.add_argument("--webhook-key", help="Webhook-avain (oletus: EVAKA_WEBHOOK_KEY tai GROK_WEBHOOK_KEY)")
-    ap.add_argument("--no-webhook", action="store_true", help="Älä lähetä webhookia vaikka muutoksia löytyisi")
-    ap.add_argument("--force-webhook", action="store_true", help="Lähetä webhook vaikka muutoksia ei olisi")
-    ap.add_argument("--init-state", action="store_true", help="Tallenna nykytila vertailupohjaksi lähettämättä webhookia")
+    ap.add_argument("--with-messages", action="store_true", help="Hae myös eVakan saapuneet viestit raw/evaka_messages.json-tiedostoon")
+    ap.add_argument("--no-messages", action="store_true", help="Älä hae viestejä (oletus)")
+    ap.add_argument("--no-git-commit", "--webhook-only", dest="no_git_commit", action="store_true",
+                    help="Varatila: älä commitoi/pushaa hoitovuorot.json-tiedostoa gitiin, lähetä vain webhook-payload")
+    ap.add_argument("--webhook-url", help="Webhook-osoite (oletus: GROK_WEBHOOK_URL / EVAKA_WEBHOOK_URL / WEBHOOK_URL)")
+    ap.add_argument("--webhook-key", help="Webhook-avain (oletus: GROK_WEBHOOK_KEY / EVAKA_WEBHOOK_KEY / WEBHOOK_KEY)")
+    ap.add_argument("--no-webhook", action="store_true", help="Älä kutsu webhookia vaikka muutoksia löytyisi")
+    ap.add_argument("--force-webhook", action="store_true", help="Kutsu webhookia vaikka muutoksia ei olisi")
+    ap.add_argument("--init-state", action="store_true", help="Tallenna nykytila vertailupohjaksi ilman git-pushia tai webhookia")
     args = ap.parse_args()
 
     load_secrets(os.path.join(ROOT, "secrets.env"))
@@ -248,28 +327,50 @@ def main():
         print("fetch-evaka.py: EVAKA_USERNAME tai EVAKA_PASSWORD puuttuu (secrets.env)", file=sys.stderr)
         sys.exit(2)
 
-    webhook_url = args.webhook_url or os.environ.get("EVAKA_WEBHOOK_URL") or os.environ.get("GROK_WEBHOOK_URL")
-    webhook_key = args.webhook_key or os.environ.get("EVAKA_WEBHOOK_KEY") or os.environ.get("GROK_WEBHOOK_KEY")
-    state_path = args.state_file or default_state_path(args.out_shifts)
+    webhook_url = (
+        args.webhook_url
+        or os.environ.get("GROK_WEBHOOK_URL")
+        or os.environ.get("EVAKA_WEBHOOK_URL")
+        or os.environ.get("WEBHOOK_URL")
+    )
+    webhook_key = (
+        args.webhook_key
+        or os.environ.get("GROK_WEBHOOK_KEY")
+        or os.environ.get("EVAKA_WEBHOOK_KEY")
+        or os.environ.get("WEBHOOK_KEY")
+    )
+    github_token = os.environ.get("GITHUB_TOKEN")
+    state_path = args.state_file
 
     today = dt.datetime.now(TZ).date()
     default_start, default_end = calendar_window(today)
     start_date = dt.date.fromisoformat(args.from_date) if args.from_date else default_start
     end_date = dt.date.fromisoformat(args.to_date) if args.to_date else default_end
 
-    # Luetaan aiempi vertailutila (ensisijaisesti viimeksi webhookilla kuitattu tila, muuten nykyinen hoitovuorot.json)
-    baseline_shifts = load_json_list(state_path)
-    if baseline_shifts is None:
-        baseline_shifts = load_json_list(args.out_shifts)
+    repo_dir = os.path.dirname(os.path.abspath(args.out_shifts)) or ROOT
+    if not args.no_git_commit and not args.init_state:
+        git_sync_before_read(repo_dir, github_token=None)
+
+    # Luetaan aiempi vertailutila (ensisijaisesti viimeksi synkattu tila, sitten hoitovuorot.json tai shared/hoitovuorot.json)
+    shared_shifts_path = os.path.join(ROOT, "shared", "hoitovuorot.json")
+    baseline_shifts = (
+        load_json_list(state_path)
+        or load_json_list(args.out_shifts)
+        or load_json_list(shared_shifts_path)
+    )
 
     client = EvakaClient()
     client.login(user, pw)
 
     shifts = fetch_care_shifts(client, start_date, end_date)
     added, removed = diff_shifts(baseline_shifts, shifts, start_date.isoformat())
-    has_changes = bool(added or removed)
+    has_changes = bool(added or removed) or not os.path.exists(args.out_shifts)
 
     atomic_write_json(args.out_shifts, shifts)
+    # Jos paikallinen shared/-kansio on olemassa (esim. Grok Botin tai handover-ympäristön rakenne), pidetään sekin ajan tasalla
+    if os.path.isdir(os.path.join(ROOT, "shared")) and os.path.abspath(args.out_shifts) != os.path.abspath(shared_shifts_path):
+        atomic_write_json(shared_shifts_path, shifts)
+
     print(
         f"hoitovuorot.json päivitetty ({start_date}..{end_date}): {len(shifts)} vuoroa "
         f"(uusia: {len(added)}, poistuneita/muuttuneita: {len(removed)})"
@@ -277,11 +378,29 @@ def main():
 
     if args.init_state:
         atomic_write_json(state_path, shifts)
-        print(f"Vertailutila alustettu ({state_path}), webhookia ei lähetetty.")
-    elif not args.no_webhook and webhook_url and (has_changes or args.force_webhook):
+        print(f"Vertailutila alustettu ({state_path}), ei git-pushia eikä webhookia.")
+        return
+
+    committed_to_git = False
+    if has_changes and not args.no_git_commit:
+        if is_git_repo(repo_dir):
+            try:
+                committed_to_git = git_commit_and_push_shifts(repo_dir, args.out_shifts, github_token=None)
+                if committed_to_git:
+                    print("hoitovuorot.json commitoitu ja pushattu origin/main-haaraan.")
+                else:
+                    print("hoitovuorot.json oli jo ajan tasalla gitissä.")
+            except Exception as e:
+                print(f"fetch-evaka.py: git commit/push epäonnistui ({e}) — jatketaan webhook-varatilalla", file=sys.stderr)
+        else:
+            print(f"Huom: {repo_dir} ei ole git-repo, ohitetaan git commit/push ja käytetään webhook-varatilaa.")
+
+    if not args.no_webhook and webhook_url and (has_changes or args.force_webhook):
         payload = {
             "source": "perhekalenteri-pi-evaka",
             "event": "hoitovuorot_updated",
+            "mode": "webhook_only" if args.no_git_commit else "git_and_webhook",
+            "committed_to_git": committed_to_git,
             "timestamp": dt.datetime.now(TZ).isoformat(timespec="seconds"),
             "forced": bool(args.force_webhook and not has_changes),
             "window": {
@@ -310,15 +429,16 @@ def main():
         except Exception as e:
             print(f"fetch-evaka.py: Webhook-virhe: {e}", file=sys.stderr)
             sys.exit(3)
+    elif has_changes and committed_to_git and (args.no_webhook or not webhook_url):
+        atomic_write_json(state_path, shifts)
+        if not args.no_webhook and not webhook_url:
+            print("Huom: hoitovuorot.json pushattiin gitiin, mutta GROK_WEBHOOK_URL puuttuu secrets.env-tiedostosta.")
     elif not has_changes:
-        # Jos muutoksia ei ollut ja state_path puuttui vielä (mutta out_shifts oli jo ajan tasalla), tallennetaan state_path
         if not os.path.exists(state_path):
             atomic_write_json(state_path, shifts)
-        print("Ei muutoksia hoitovuoroissa — webhookia ei lähetetä.")
-    elif not webhook_url and not args.no_webhook:
-        print("Huom: Hoitovuoroissa on muutoksia, mutta EVAKA_WEBHOOK_URL/GROK_WEBHOOK_URL ei ole asetettu.")
+        print("Ei muutoksia hoitovuoroissa — ei git-committia eikä webhook-kutsua.")
 
-    if not args.no_messages:
+    if args.with_messages and not args.no_messages:
         msgs = fetch_messages(client)
         atomic_write_json(args.out_messages, msgs)
         print(f"evaka_messages.json päivitetty: {len(msgs['ketjut'])} viestiketjua")

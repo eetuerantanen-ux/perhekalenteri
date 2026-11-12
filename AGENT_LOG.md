@@ -40,56 +40,43 @@ This file is the shared coordination log between **Antigravity** and **Grok Bot*
 
 ## Change Log
 
-### 2026-11-12 13:51 (Europe/Helsinki) — [Antigravity] — Share `fetch-evaka.py` with change detection & webhook push to Grok Bot
+### 2026-11-12 14:02 (Europe/Helsinki) — [Antigravity] — Default `fetch-evaka.py` to git commit `hoitovuorot.json` + call publish webhook (with webhook-payload backup)
 - **Agent**: Antigravity
 - **Changes**:
-  - Added `fetch-evaka.py` to the repository root so it can run on a Raspberry Pi (via `cron`) or directly inside Grok Bot's workspace.
-  - Authenticates directly against Kouvola eVaka's Citizen JSON API (`POST /api/citizen/auth/weak-login` with `X-Evaka-Csrf: 1`) using only the Python 3 standard library (`urllib.request` + `http.cookiejar`, zero external packages).
-  - Fetches care shifts (`GET /api/citizen/reservations?from=YYYY-MM-DD&to=YYYY-MM-DD`) for the 2-month calendar grid window (`calendar_window(today)`), skips days with a recorded absence (`absence != None`), and writes `shared/hoitovuorot.json` (`[{lapsi, pvm, alku, loppu}]`).
-  - **Change detection & Webhook push**:
-    - Compares newly fetched shifts in the active window (`pvm >= start_date`) against the last acknowledged webhook state (`shared/.hoitovuorot.json.sent.json`, falling back to existing `shared/hoitovuorot.json`).
-    - Only when shifts are added, modified, or removed (or when `--force-webhook` is passed), sends an HTTP `POST` with `Authorization: Bearer <key>` to `EVAKA_WEBHOOK_URL` (or `GROK_WEBHOOK_URL`) and updates `.hoitovuorot.json.sent.json` once HTTP 2xx is received (so temporary network failures automatically retry on the next cron run).
-  - **Webhook JSON Payload sent by `fetch-evaka.py`**:
-    ```json
-    {
-      "source": "perhekalenteri-pi-evaka",
-      "event": "hoitovuorot_updated",
-      "timestamp": "2026-11-12T13:51:00+02:00",
-      "forced": false,
-      "window": {"from": "YYYY-MM-DD", "to": "YYYY-MM-DD"},
-      "summary": {"total": 45, "added_count": 1, "removed_count": 0},
-      "diff": {
-        "added": [{"lapsi": "...", "pvm": "YYYY-MM-DD", "alku": "HH:MM", "loppu": "HH:MM"}],
-        "removed": []
-      },
-      "hoitovuorot": [
-        {"lapsi": "...", "pvm": "YYYY-MM-DD", "alku": "HH:MM", "loppu": "HH:MM"}
-      ]
-    }
-    ```
-  - Reads credentials and webhook settings from `secrets.env` (or environment variables): `EVAKA_USERNAME`, `EVAKA_PASSWORD`, `EVAKA_WEBHOOK_URL` (or `GROK_WEBHOOK_URL`), `EVAKA_WEBHOOK_KEY` (or `GROK_WEBHOOK_KEY`). Contains zero hardcoded credentials or personal data.
+  - Updated `fetch-evaka.py` per Grok Bot's suggestion so the **default mode** when care shifts change (or new shifts appear) is:
+    1. Sync local repo with `origin/main` (`git fetch` + `git rebase --autostash origin/main`).
+    2. Write updated shifts to `hoitovuorot.json` in the repository root (and `shared/hoitovuorot.json` if `shared/` exists locally).
+    3. Compare active-window shifts (`pvm >= start_date`) against the previous baseline (`.publish-state/hoitovuorot.sent.json` / `hoitovuorot.json`).
+    4. **Default primary action**: `git add hoitovuorot.json` -> `git commit -m "Hoitovuorot YYYY-MM-DD HH:MM"` -> `git push origin HEAD:main` (with automatic rebase retry and optional `GITHUB_TOKEN` auth fallback from `secrets.env`).
+    5. **Trigger publish webhook**: Calls the existing Grok Bot publish webhook (`GROK_WEBHOOK_URL` / `WEBHOOK_URL` with `Authorization: Bearer <key>`) so Grok Bot immediately pulls `hoitovuorot.json` from `origin/main` and updates the encrypted calendar (`data.enc.json`).
+    6. **Backup mode preserved**: The webhook `POST` body always includes the full JSON payload (`{"event": "hoitovuorot_updated", "mode": "git_and_webhook", "committed_to_git": true, "hoitovuorot": [...], "diff": {"added": [...], "removed": [...]}}`), and running with `--webhook-only` (`--no-git-commit`) skips git commit/push and sends only the webhook payload.
+  - Stores the last-synced state in `.publish-state/hoitovuorot.sent.json` (which is already ignored by `.gitignore`) so no temporary state file is ever committed to the repo.
 - **Usage & CLI Flags (Raspberry Pi / Cron)**:
-  - Initialize baseline state on first install without triggering the webhook:
+  - Default cron run (fetches shifts; if changed, commits & pushes `hoitovuorot.json` to `origin/main` and calls the webhook):
     ```bash
-    python3 fetch-evaka.py --no-messages --init-state
+    python3 fetch-evaka.py
     ```
-  - Periodic cron run on Raspberry Pi (checks shifts and pushes webhook to Grok Bot only when shifts change):
+  - Backup webhook-only mode (no git commit/push; sends shifts in webhook JSON payload):
     ```bash
-    python3 fetch-evaka.py --no-messages
+    python3 fetch-evaka.py --webhook-only
     ```
-  - Force a test webhook push even if shifts have not changed:
+  - Initialize baseline state on first install without triggering git push or webhook:
     ```bash
-    python3 fetch-evaka.py --no-messages --force-webhook
+    python3 fetch-evaka.py --init-state
+    ```
+  - Force a webhook call even if shifts have not changed:
+    ```bash
+    python3 fetch-evaka.py --force-webhook
     ```
 - **Reasoning**:
-  - Running `fetch-evaka.py --no-messages` on a Raspberry Pi cron schedule costs zero AI tokens during normal polling and only wakes up Grok Bot via webhook when care shifts actually change or new shifts appear.
+  - Committing `hoitovuorot.json` to `origin/main` and calling the existing publish webhook lets the Raspberry Pi trigger calendar updates using the exact webhook already in place, while keeping the direct webhook payload as an automatic fallback.
 - **Affected Files & Components**:
   - `fetch-evaka.py` (in repository root; no changes to `index.html`, `app.js`, or `style.css`).
   - `AGENT_LOG.md`
 - **Grok Bot Automation Impact**:
-  - **Webhook Handler Support**: When Grok Bot receives a webhook payload with `"event": "hoitovuorot_updated"` and a `"hoitovuorot"` list (either on the existing webhook or a dedicated eVaka webhook), Grok Bot can write `payload["hoitovuorot"]` directly to `shared/hoitovuorot.json`, run `python3 collect.py`, and run `bash publish.sh` without needing to open a browser or log in to eVaka.
+  - **Action for Grok Bot's `publish.sh` / `collect.py`**: When `publish.sh` syncs `publish/` from `origin/main` (or when the webhook runs), copy `publish/hoitovuorot.json` into `shared/hoitovuorot.json` before `collect.py` runs (or read `publish/hoitovuorot.json` directly in `collect.py`). Note: `check_plaintext.py` treats non-`GENERATED_RE` files in `publish/` as `$OTH` (logged to `notices.log` only), or `check_plaintext.py` can ignore `hoitovuorot.json` in `publish/` if desired.
 - **Publish Status**:
-  - **Published via webhook**: NO (utility script + documentation only; no frontend/UI changes).
+  - **Published via webhook**: NO (script + documentation update only).
 
 ### 2026-11-12 12:56 (Europe/Helsinki) — [Antigravity] — Verify handover package locally and remove `perhekalenteri-handover.tar.gz.gpg` from public repo
 - **Agent**: Antigravity
