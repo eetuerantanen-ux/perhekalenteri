@@ -25,11 +25,11 @@ This file is the shared coordination log between **Antigravity** and **Grok Bot*
 |---|---|---|---|
 | Perhekalenterin päivitys | Tekninen automaatiobotti (Grok Bot) | every 30 min, 06:00–22:00 (and on webhook trigger) | sync `publish/` from `origin/main` → if `publish/hoitovuorot.enc.json` exists and is newer than `shared/hoitovuorot.json`, decrypt to `shared/hoitovuorot.json` (`python3 publish/fetch-evaka.py --out-shifts publish/hoitovuorot.enc.json --decrypt-to shared/hoitovuorot.json`, keeping Arjen apuri's `shared/hoitovuorot.json` as fallback) → fetch 4 Google calendars → `python3 collect.py` → `bash publish.sh` |
 | Pörssisähkön hinnat | Tekninen automaatiobotti (Grok Bot) | daily 16:00 | `python3 fetch-prices.py` (internally runs `python3 fetch-forecast.py --out publish/forecast.json`) |
-| Muistilista (Google Keep) | Arjen apuri (Grok Bot) | hourly 07:00–21:00 | writes `shared/muistilista.json` (`[{teksti, tehty}]`) from Keep note "Muistilista" (box browser) |
+| **Muistilista (Google Keep)** | **Raspberry Pi (`fetch-keep.py`) + Arjen apuri fallback** | **Hourly 07:00–21:00 on Pi** | Connects to Google Keep (`gkeepapi` with `KEEP_EMAIL` + `KEEP_MASTER_TOKEN`), reads note `"Muistilista"` (`[{teksti, tehty}]`), compares against `.publish-state/muistilista.sent.json` / `muistilista.enc.json`, and if changed: encrypts with `AES-256-GCM` (`PBKDF2-SHA256`, 1,000,000 iterations, `FAMILY_PLANNER_PASSWORD`) to **`muistilista.enc.json`**, commits & pushes `muistilista.enc.json` to `origin/main`, and calls Grok Bot's publish webhook (`muistilista_enc` + `muistilista` + `diff` in POST JSON body). `publish.sh` decrypts `muistilista.enc.json` into `shared/muistilista.json` (`python3 publish/fetch-keep.py --out-todo publish/muistilista.enc.json --decrypt-to shared/muistilista.json`, newer source wins vs. Arjen apuri fallback). Also supports `--add`, `--remove`, `--check`, `--uncheck` for two-way editing |
 | Muistutukset (eVaka) | Arjen apuri (Grok Bot) | hourly on weekdays 07:00–19:00 | writes `shared/muistutukset.json` (eVaka, read-only; fields `otsikko`, `pvm`, `lapsi`, `lahde`) |
 | Muistutukset (email) | Arjen apuri (Grok Bot) | hourly 08:00–21:00 | appends to `shared/muistutukset.json` from `eetu.org` email (`lahde="sähköposti"`) |
 | **Hoitovuorot (eVaka)** | **Raspberry Pi (`fetch-evaka.py`) + Arjen apuri fallback** | **Scheduled cron on Pi** | Logs into `varhaiskasvatus.kouvola.fi` citizen API (`EVAKA_USERNAME` + `EVAKA_PASSWORD`), fetches 2-month care shifts (`[{lapsi, pvm, alku, loppu}]`), compares against `.publish-state/hoitovuorot.sent.json` / `hoitovuorot.enc.json`, and if changed: encrypts with `AES-256-GCM` (`PBKDF2-SHA256`, 1,000,000 iterations, `FAMILY_PLANNER_PASSWORD`) to **`hoitovuorot.enc.json`**, commits & pushes `hoitovuorot.enc.json` to `origin/main`, and calls Grok Bot's publish webhook (`hoitovuorot_enc` + `hoitovuorot` + `diff` in POST JSON body). `publish.sh` decrypts `hoitovuorot.enc.json` into `shared/hoitovuorot.json` (newer source wins vs. Arjen apuri fallback) |
-| Antigravity / Pi julkaisu (webhook) | Koodaribotti (Grok Bot) | on demand | webhook triggers `publish.sh` (decrypts `hoitovuorot.enc.json` → `shared/hoitovuorot.json` → `collect.py` → `data.enc.json`) |
+| Antigravity / Pi julkaisu (webhook) | Koodaribotti (Grok Bot) | on demand | webhook triggers `publish.sh` (decrypts `hoitovuorot.enc.json` & `muistilista.enc.json` → `shared/` → `collect.py` → `data.enc.json`) |
 | Tablet version check | tablet browser | data every 5 min; full reload every 6 h | `app.js checkVersion()` fetches `version.json` and reloads when the version changes |
 
 ---
@@ -54,6 +54,34 @@ This file is the shared coordination log between **Antigravity** and **Grok Bot*
 ---
 
 ## Change Log
+
+### 2026-11-12 22:11 (Europe/Helsinki) — [Antigravity] — Add `fetch-keep.py` for Google Keep `Muistilista` automation (`muistilista.enc.json` + webhook + two-way edit support)
+- **Agent**: Antigravity
+- **Changes**:
+  - Added `fetch-keep.py` to the repository root to automate fetching (and future tablet editing) of the Google Keep `"Muistilista"` note on the Raspberry Pi using the exact same encrypted architecture as `fetch-evaka.py` (`hoitovuorot.enc.json`):
+    1. **Google Keep Sync (`gkeepapi`)**: Authenticates with `KEEP_EMAIL` (falls back to `EVAKA_USERNAME`) and `KEEP_MASTER_TOKEN` from `secrets.env`, caches sync state in `.publish-state/keep_state.json`, finds the `"Muistilista"` note, and extracts `[{teksti, tehty}]` items. Automatically re-execs into `ROOT/.venv/bin/python3` if `gkeepapi` is installed in a local virtualenv on the Raspberry Pi.
+    2. **One-Time Token Setup Helper**: Includes `--exchange-oauth-token "oauth2_4/..." --save-token` (`gpsoauth.exchange_token`) to exchange a one-time Google `oauth_token` cookie into a permanent `KEEP_MASTER_TOKEN` in `secrets.env`.
+    3. **Diff & `AES-256-GCM` Encryption (`muistilista.enc.json`)**: Compares items against `.publish-state/muistilista.sent.json` (or decrypted `muistilista.enc.json`). Only when items are added, removed, reordered, or checked/unchecked does it encrypt the list into **`muistilista.enc.json`** (`AES-256-GCM`, `PBKDF2-SHA256`, `iter: 1000000`, `FAMILY_PLANNER_PASSWORD`), commit & push `muistilista.enc.json` to `origin/main` (`Muistilista (salattu) YYYY-MM-DD HH:MM`), and call Grok Bot's publish webhook with `event: "muistilista_updated"`, `muistilista_enc`, `muistilista`, and `diff`.
+    4. **Stdlib-Only Decryption for `publish.sh`**: `--decrypt` and `--decrypt-to shared/muistilista.json` use only Python stdlib + OpenSSL `libcrypto` (no `gkeepapi` required on Grok Bot's side).
+    5. **Two-Way Mutation Flags (Ready for Tablet UI)**: Supports `--add "Teksti"`, `--remove "Teksti"`, `--check "Teksti"`, and `--uncheck "Teksti"` to modify the Google Keep note directly, sync back to Google Keep, and push the updated `muistilista.enc.json`.
+  - Updated `.gitignore` to ignore `muistilista.json`, `muistutukset.json`, `.venv/`, `__pycache__/`, and `*.pyc`.
+- **Reasoning**:
+  - Transfers periodic `Muistilista` fetching to the Raspberry Pi without browser scraping or AI token usage, keeps todo items encrypted at rest (`muistilista.enc.json`) in the public repo, and provides built-in add/remove/check support for upcoming tablet UI editing.
+- **Affected Files & Components**:
+  - `fetch-keep.py` (new script in repository root)
+  - `.gitignore`
+  - `AGENT_LOG.md`
+- **Grok Bot Automation Impact**:
+  - **Required (`publish.sh`)**:
+    1. Mirror the `hoitovuorot.enc.json` decrypt step in `publish.sh` for `muistilista.enc.json` before `collect.py` runs (preferring whichever of `publish/muistilista.enc.json` vs. Arjen apuri's `shared/muistilista.json` is newer):
+       ```bash
+       if [ -f "$PUB/muistilista.enc.json" ]; then
+         python3 "$PUB/fetch-keep.py" --out-todo "$PUB/muistilista.enc.json" --decrypt-to "$ROOT/shared/muistilista.json"
+       fi
+       ```
+    2. Add `muistilista.json`, `muistutukset.json`, `.venv/`, `__pycache__/`, and `*.pyc` to `publish.sh`'s `.gitignore` heredoc so they are preserved on publish runs.
+- **Publish Status**:
+  - **Published via webhook**: NO (script + documentation update only; no frontend UI changes).
 
 ### 2026-11-12 21:53 (Europe/Helsinki) — [Antigravity] — Change `Ruokalista` card rollover time from 13.00 to 16.00
 - **Agent**: Antigravity

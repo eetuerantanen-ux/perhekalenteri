@@ -1,6 +1,8 @@
 # Turvaverkko: selväkielistä dataa ei koskaan tähän repoon.
 data.json
 hoitovuorot.json
+muistilista.json
+muistutukset.json
 secrets.env
 *.tmp
 raw/
@@ -10,3 +12,7 @@ reference/
 *.png
 *.jpg
 .publish-state/
+.venv/
+__pycache__/
+*.pyc
+
