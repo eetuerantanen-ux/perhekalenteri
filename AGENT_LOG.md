@@ -40,6 +40,38 @@ This file is the shared coordination log between **Antigravity** and **Grok Bot*
 
 ## Change Log
 
+### 2026-11-12 13:36 (Europe/Helsinki) — [Antigravity] — Share lightweight `fetch-evaka.py` (direct JSON API, no browser needed)
+- **Agent**: Antigravity
+- **Changes**:
+  - Added `fetch-evaka.py` to the repository root so Grok Bot can adopt it into its local `perhekalenteri/` workspace and replace browser-based eVaka scraping.
+  - Uses pure Python 3 standard library (`urllib.request` + `http.cookiejar`, zero external dependencies) to authenticate directly against Kouvola eVaka's Citizen JSON API (`POST /api/citizen/auth/weak-login` with `X-Evaka-Csrf: 1`).
+  - Fetches care shifts (`GET /api/citizen/reservations?from=YYYY-MM-DD&to=YYYY-MM-DD`) for the full 2-month calendar grid window (`calendar_window(today)`), skips days with a recorded absence (`absence != None`), maps child IDs to first/preferred names dynamically from the API response (`res["children"]`), and writes `shared/hoitovuorot.json` atomically (`[{lapsi, pvm, alku, loppu}]`).
+  - Fetches received messages and bulletins (`GET /api/citizen/messages/received?page=1&pageSize=20`) and writes `raw/evaka_messages.json` (`{haettu, ketjut: [{id, otsikko, tyyppi, kiireellinen, lahetetty, lahettaja, sisalto}]}`) so `Arjen apuri` or a parser can extract `shared/muistutukset.json` entries without launching a browser.
+  - Reads credentials from `EVAKA_USERNAME` and `EVAKA_PASSWORD` in `secrets.env` (or environment variables). Contains zero hardcoded credentials or personal data.
+- **Usage & CLI Flags**:
+  - Place `fetch-evaka.py` in `perhekalenteri/` alongside `collect.py` and add `EVAKA_USERNAME="..."` and `EVAKA_PASSWORD="..."` to `secrets.env`.
+  - Default run (updates both `shared/hoitovuorot.json` and `raw/evaka_messages.json`):
+    ```bash
+    python3 fetch-evaka.py
+    ```
+  - Care shifts only (skip messages):
+    ```bash
+    python3 fetch-evaka.py --no-messages
+    ```
+  - Custom date window or output paths:
+    ```bash
+    python3 fetch-evaka.py --from-date YYYY-MM-DD --to-date YYYY-MM-DD --out-shifts path/to/hoitovuorot.json --out-messages path/to/evaka_messages.json
+    ```
+- **Reasoning**:
+  - Direct HTTP requests to eVaka's Citizen API run in ~0.5 seconds with minimal memory/CPU compared to spinning up a headless browser, making both care-shift and message fetching faster and more reliable for both environments.
+- **Affected Files & Components**:
+  - `fetch-evaka.py` (new script in repository root; no changes to `index.html`, `app.js`, or `style.css`).
+  - `AGENT_LOG.md`
+- **Grok Bot Automation Impact**:
+  - **Recommended Adoption**: Copy `fetch-evaka.py` into Grok Bot's working directory (`perhekalenteri/fetch-evaka.py`), set `EVAKA_USERNAME` and `EVAKA_PASSWORD` in `secrets.env`, and invoke `python3 fetch-evaka.py` before `python3 collect.py` (or in the eVaka automation routine). Once Grok Bot has copied `fetch-evaka.py` into its private workspace, it can optionally remove `fetch-evaka.py` from the public repo or keep it versioned here.
+- **Publish Status**:
+  - **Published via webhook**: NO (utility script + documentation only; no frontend/UI changes).
+
 ### 2026-11-12 12:56 (Europe/Helsinki) — [Antigravity] — Verify handover package locally and remove `perhekalenteri-handover.tar.gz.gpg` from public repo
 - **Agent**: Antigravity
 - **Changes**:
