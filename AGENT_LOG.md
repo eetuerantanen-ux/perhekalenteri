@@ -40,6 +40,35 @@ This file is the shared coordination log between **Antigravity** and **Grok Bot*
 
 ## Change Log
 
+### 2026-11-12 12:47 (Europe/Helsinki) — [Grok Bot] — Encrypted handover package + automation schedule
+- **Agent**: Grok Bot
+- **Changes**:
+  - Added `perhekalenteri-handover.tar.gz.gpg` to the repository root: an encrypted archive of all scripts, docs, site/site-dev code, formats and the real secrets Antigravity needs to take over the family planner if Eetu's Grok Bot usage ends. Includes `HANDOVER.md` (architecture, APIs, flow) and `secrets.env` (secret values).
+  - **Encryption**: GPG symmetric (OpenPGP), cipher **AES-256**, S2K mode 3 (iterated+salted), S2K digest **SHA-512**, S2K count **65011712**. Passphrase provided by Eetu out-of-band (not in this repo or any log).
+  - **Decrypt**: `gpg --decrypt perhekalenteri-handover.tar.gz.gpg | tar xz` (run in an empty dir).
+  - **After extracting**: delete the package from the repo — `git rm perhekalenteri-handover.tar.gz.gpg && git commit && git push` — and keep `secrets.env` out of the repo. The repo is public.
+  - `secrets.env` contains (names only): `FAMILY_PLANNER_PASSWORD`, `GITHUB_TOKEN` (Eetu's own gh OAuth token, scopes gist/read:org/repo/workflow — consider rotating after migration), `GITHUB_USER`, `GIT_REMOTE`.
+- **Reasoning**:
+  - Business-continuity handover requested by Eetu, so another agent can download, decrypt and then delete the package.
+- **Affected Files & Components**:
+  - New: `perhekalenteri-handover.tar.gz.gpg` (repo root). No change to page behaviour. `publish.sh`/`fetch-prices.py` leave the `.gpg` untouched (binary, not stamped, not plaintext-checked, not in .gitignore).
+
+#### Automation schedule (all Europe/Helsinki)
+| Routine | Run by | Schedule | Exact steps / commands |
+|---|---|---|---|
+| Perhekalenterin päivitys | Tekninen automaatiobotti | every 30 min, 06:00–22:00 | fetch 4 Google calendars with the Calendar connector per `fetch-notes.md` (read-only) → `python3 collect.py` → `bash publish.sh` |
+| Pörssisähkön hinnat | Tekninen automaatiobotti | daily 16:00 | `python3 fetch-prices.py` (internally runs `python3 fetch-forecast.py --out publish/forecast.json`) |
+| Muistilista (Google Keep) | Arjen apuri | hourly 07:00–21:00 | writes `shared/muistilista.json` (`[{teksti, tehty}]`) from Keep note "Muistilista" (box browser) |
+| Muistutukset (eVaka) | Arjen apuri | hourly on weekdays 07:00–19:00 | writes `shared/muistutukset.json` (eVaka, read-only; fields otsikko, pvm, lapsi, lahde) |
+| Muistutukset (email) | Arjen apuri | hourly 08:00–21:00 | appends to `shared/muistutukset.json` from eetu.org email (lahde="sähköposti") |
+| Hoitovuorot | Arjen apuri | **cadence not documented — verify with Arjen apuri/Eetu** | writes `shared/hoitovuorot.json` (`[{lapsi, pvm, alku, loppu}]`) |
+| Antigravity-julkaisu (webhook) | Koodaribotti | on demand | webhook triggers a publish; URL/key live only in the Grok Bot app (not exportable) |
+| Tablet version check | tablet browser | data every 5 min; full reload every 6 h | `app.js checkVersion()` fetches `version.json` and reloads when the version changes |
+
+- **Verification**: Tekninen automaatiobotti's two routines and the webhook owner are verified against repo notes (`fetch-notes.md`, `README.md`) and Grok Bot's own records. Arjen apuri's Keep/eVaka/email cadences come from Grok Bot's records (not independently verifiable from repo files). The **hoitovuorot.json cadence is unverified** — not found in any file or note; flagged for confirmation.
+- **Grok Bot Automation Impact**:
+  - **None** to data schema or fetchers. Publish scripts already preserve non-generated repo files. No secrets are stored in this log.
+
 ### 2026-11-12 12:23 (Europe/Helsinki) — [Antigravity] — Make `Tänään` tile clickable to open hovering window with today's events
 - **Agent**: Antigravity
 - **Changes**:
