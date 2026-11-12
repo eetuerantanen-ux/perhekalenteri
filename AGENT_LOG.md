@@ -55,6 +55,30 @@ This file is the shared coordination log between **Antigravity** and **Grok Bot*
 
 ## Change Log
 
+### 2026-11-12 22:56 (Europe/Helsinki) — [Antigravity] — Activate Raspberry Pi `fetch-keep.py` (`muistilista.enc.json`) + add weekly Tuesday 14:00 `fetch-menus.py` (`ruokalistat.enc.json`)
+- **Agent**: Antigravity
+- **Changes**:
+  - **Activated `fetch-keep.py` on Raspberry Pi (`0 7-21 * * *`)**:
+    1. Added compatibility in `fetch-keep.py` for `gkeepapi 0.14.2` on Debian 11 Python 3.9 (`keep.resume(...)` fallback when `keep.authenticate` is absent, plus safe `WebLink._load` handling for Keep notes with link previews missing optional `description`/`title` fields).
+    2. Configured `KEEP_MASTER_TOKEN` in `/home/pi/perhekalenteri/secrets.env`, verified live Google Keep `"Muistilista"` sync, and pushed initial encrypted `muistilista.enc.json` to `origin/main`.
+  - **Added `fetch-menus.py` for weekly daycare menu updates (`0 14 * * 2` — Tuesdays at 14:00)**:
+    1. Fetches both **Lehvätien päiväkoti** (`Lehvatienpk`, `rooli: "arki"`) and **Jaakonpuiston päiväkoti** (`Jaakonpuistonpk`, `rooli: "vuoro"`) from Kouvolan Aromi14 eMenus for the current + next month (`menu_window(today)`).
+    2. Compares upcoming days (`pvm >= today`) against `.publish-state/ruokalistat.sent.json` / `ruokalistat.enc.json` and **only commits & pushes `ruokalistat.enc.json` (`AES-256-GCM`, `PBKDF2-SHA256`, 1,000,000 iterations) when new or updated menu items appear in the coming weeks**.
+    3. Includes `--decrypt` and `--decrypt-to shared/ruokalistat.json` flags using stdlib + OpenSSL `libcrypto`.
+  - **Failure Alerting (`run_evaka_cron.py`)**:
+    - All three Raspberry Pi cron jobs (`evaka` at `0 7,14,19 * * *`, `keep` at `0 7-21 * * *`, and `menus` at `0 14 * * 2`) are wrapped with per-job failure tracking and send an email alert via `mail.gandi.net:465` (`From: eetu@eetu.org`, `To: eetu.e.rantanen@gmail.com`) if a job fails 3 times in a row.
+- **Affected Files & Components**:
+  - `fetch-keep.py` (`gkeepapi 0.14.2` compatibility)
+  - `fetch-menus.py` (new weekly Aromi14 menu fetcher for Lehvätien & Jaakonpuiston päiväkoti)
+  - `muistilista.enc.json`, `ruokalistat.enc.json`
+  - `.gitignore`, `AGENT_LOG.md`
+- **Grok Bot Automation Impact**:
+  - **Recommended (`publish.sh` / `collect.py`)**:
+    - Decrypt `publish/muistilista.enc.json` -> `shared/muistilista.json` (`python3 publish/fetch-keep.py --out-todo publish/muistilista.enc.json --decrypt-to shared/muistilista.json`) before `collect.py`.
+    - Optionally decrypt `publish/ruokalistat.enc.json` -> `shared/ruokalistat.json` (`python3 publish/fetch-menus.py --out-menus publish/ruokalistat.enc.json --decrypt-to shared/ruokalistat.json`) in `publish.sh` and read `shared/ruokalistat.json` in `collect.py` (falling back to live Aromi14 fetch if missing) so `collect.py` doesn't need to poll Aromi14 every 30 minutes.
+- **Publish Status**:
+  - **Published via webhook**: NO (Raspberry Pi automation & encrypted data files pushed to `origin/main`).
+
 ### 2026-11-12 22:11 (Europe/Helsinki) — [Antigravity] — Add `fetch-keep.py` for Google Keep `Muistilista` automation (`muistilista.enc.json` + webhook + two-way edit support)
 - **Agent**: Antigravity
 - **Changes**:

@@ -311,6 +311,19 @@ def ensure_keep_deps():
     """
     try:
         import gkeepapi  # noqa: F401
+        import gkeepapi.node
+
+        def _safe_weblink_load(self, raw):
+            super(gkeepapi.node.WebLink, self)._load(raw)
+            wl = raw.get("webLink") or {}
+            self._title = wl.get("title")
+            self._url = wl.get("url", "")
+            self._image_url = wl.get("imageUrl")
+            self._provenance_url = wl.get("provenanceUrl", "")
+            self._description = wl.get("description")
+
+        if hasattr(gkeepapi.node, "WebLink"):
+            gkeepapi.node.WebLink._load = _safe_weblink_load
         return
     except ImportError:
         venv_py = os.path.join(ROOT, ".venv", "bin", "python3")
@@ -456,7 +469,10 @@ def fetch_and_mutate_keep_todo(
         except Exception:
             cached_state = None
 
-    keep.authenticate(email, master_token, state=cached_state)
+    if hasattr(keep, "authenticate"):
+        keep.authenticate(email, master_token, state=cached_state)
+    else:
+        keep.resume(email, master_token, state=cached_state)
     note = find_keep_note(keep, note_title=note_title, note_id=note_id)
 
     mutated = apply_keep_mutations(
