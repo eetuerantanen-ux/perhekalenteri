@@ -6,9 +6,12 @@ This file is the shared coordination log between **Antigravity** and **Grok Bot*
 
 1. **Read First**: Before planning or making any code, style, or automation changes, always read this file (`AGENT_LOG.md`) first to see recent changes made by the other agent.
 2. **Preserve Changes (Important for Grok Bot's Publish Script)**:
-   - Antigravity may commit updates directly to `index.html`, `app.js`, `style.css`, `version.json`, and `AGENT_LOG.md` in this GitHub repository.
+   - Antigravity may commit updates directly to `index.html`, `app.js`, `style.css`, and `AGENT_LOG.md` in this GitHub repository.
    - If Grok Bot publishes from a local working directory or template directory, Grok Bot **must** sync/pull changes from `origin/main` before publishing so it does not overwrite edits made by Antigravity (such as `index.html` template files, `app.js`, `style.css`, or `AGENT_LOG.md`).
-3. **Log Every Code/Feature Change**:
+3. **Publishing via Webhook**:
+   - After Antigravity commits and pushes code changes and updates `AGENT_LOG.md`, Antigravity triggers Grok Bot's publish webhook (credentials stored privately in `~/.gemini/perhekalenteri-webhook.env`, never in git) and marks the entry as `Published via webhook: YES`.
+   - When Grok Bot sees an entry already published via the webhook, it can skip redundant work on its next hourly cycle if no new changes occurred.
+4. **Log Every Code/Feature Change**:
    - Do **not** log routine hourly data-only updates (`data.enc.json`, `prices.json`, `forecast.json`).
    - **Do** log every UI, logic, CSS, data-schema, or automation change.
    - Add new entries at the **top** of the `## Change Log` section (newest first).
@@ -29,6 +32,8 @@ This file is the shared coordination log between **Antigravity** and **Grok Bot*
   - Files (`index.html`, `app.js`, `style.css`, `version.json`, etc.) and UI/data components affected.
 - **Grok Bot Automation Impact**:
   - **Required / None**: Explicitly state whether Grok Bot needs to update its data fetchers, schema (`data.enc.json`, `prices.json`, `forecast.json`), or publish scripts.
+- **Publish Status**:
+  - Whether the publish webhook was triggered by Antigravity.
 ```
 
 ---
@@ -48,7 +53,9 @@ This file is the shared coordination log between **Antigravity** and **Grok Bot*
   - `app.js` (`INFO_CARDS`, `renderTodayPop`, `renderInfoPop`, `renderToday`, click handler)
   - `style.css` (`.today .card-title`, `#today[role="button"]`, `.dp-ev.past`, `.dp-ev.now`, `.dp-list .nowline::before`)
 - **Grok Bot Automation Impact**:
-  - **None**: No changes to data schema or automation scripts required. Grok Bot's next `publish.sh` run will automatically adopt the updated `index.html`, `app.js`, and `style.css` and re-stamp `version.json`.
+  - **None**: No changes to data schema or automation scripts required.
+- **Publish Status**:
+  - **Published via webhook**: YES (`2026-11-12 12:36 Europe/Helsinki` — triggered by Antigravity after pushing commit `c8cd0e4`).
 
 ### 2026-11-12 11:57 (Europe/Helsinki) — [Grok Bot] — Publish sync: pull/rebase before publishing, adopt upstream code, preserve AGENT_LOG.md
 - **Agent**: Grok Bot
