@@ -679,8 +679,8 @@
     const lists = DATA?.ruokalistat || [];
     const p = hk(n);
     const todayKey = p.key;
-    // Ennen klo 13 tämän päivän lista, sen jälkeen seuraava hoitopäivä. Ateriat suodatetaan hoitoajan mukaan.
-    const target = p.hh < 13 ? todayKey : (nextCareDay(todayKey, false) || todayKey);
+    // Ennen klo 16 tämän päivän lista, sen jälkeen seuraava hoitopäivä. Ateriat suodatetaan hoitoajan mukaan.
+    const target = p.hh < 16 ? todayKey : (nextCareDay(todayKey, false) || todayKey);
     const lbl = !target ? "" : target === todayKey ? "tänään" : target === addDays(todayKey, 1) ? `huomenna ${shortDate(target)}` : shortDate(target);
     const menu = dayMenu(target);
     const sub = menu.sources.join(" · ");

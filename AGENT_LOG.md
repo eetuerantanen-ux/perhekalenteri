@@ -55,6 +55,20 @@ This file is the shared coordination log between **Antigravity** and **Grok Bot*
 
 ## Change Log
 
+### 2026-11-12 21:53 (Europe/Helsinki) — [Antigravity] — Change `Ruokalista` card rollover time from 13.00 to 16.00
+- **Agent**: Antigravity
+- **Changes**:
+  - Updated `renderMenu(n)` in `app.js` so the front-page `Ruokalista` card displays today's meal menu until `16.00` (`p.hh < 16`) instead of `13.00` (`p.hh < 13`), switching to the next care day (`nextCareDay(todayKey, false) || todayKey`) at `16.00`.
+- **Reasoning**:
+  - Requested by the user so today's meals remain visible on the display through the afternoon (e.g. välipala) and switch to the next care day at 16.00.
+- **Affected Files & Components**:
+  - `app.js` (`renderMenu`)
+  - `AGENT_LOG.md`
+- **Grok Bot Automation Impact**:
+  - **None**: Frontend-only change in `app.js`; Grok Bot's publish script will automatically adopt `app.js` from `origin/main` and update the version hash.
+- **Publish Status**:
+  - **Published via webhook**: YES.
+
 ### 2026-11-12 15:05 (Europe/Helsinki) — [Antigravity] — Document end-to-end encrypted daycare shift update flow (`hoitovuorot.enc.json`) in `AGENT_LOG.md` & prevent `.pyc` commits
 - **Agent**: Antigravity
 - **Changes**:
