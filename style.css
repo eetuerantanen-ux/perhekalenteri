@@ -477,10 +477,13 @@ body.night .pc-bar.p-orange { fill: #d47220; } body.night .pc-bar.p-red { fill: 
 .fc-chart .pc-bar { opacity: 0.88; }
 .price[role="button"] { width: 134px; }
 
-/* ---------- napautettavat kortit (Muistutukset, Muistilista, Ruokalista) ja niiden ikkuna ---------- */
-#reminders[role="button"], #todo[role="button"], #menu[role="button"] { cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent; transition: transform .08s ease; }
-#reminders[role="button"]:active, #todo[role="button"]:active, #menu[role="button"]:active { transform: scale(0.985); }
-#reminders:focus-visible, #todo:focus-visible, #menu:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+/* ---------- napautettavat kortit (Tänään, Muistutukset, Muistilista, Ruokalista) ja niiden ikkuna ---------- */
+#today[role="button"], #reminders[role="button"], #todo[role="button"], #menu[role="button"] { cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent; transition: transform .08s ease; }
+#today[role="button"]:active, #reminders[role="button"]:active, #todo[role="button"]:active, #menu[role="button"]:active { transform: scale(0.985); }
+#today:focus-visible, #reminders:focus-visible, #todo:focus-visible, #menu:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.dp-ev.past { opacity: 0.45; }
+.dp-ev.now { background: var(--card-2); }
+.dp-list .nowline::before { margin-left: 98px; }
 .card-link { margin-left: auto; flex: none; align-self: center; display: inline-flex; align-items: center; gap: 3px;
   font-family: "Fraunces", Georgia, serif; font-size: 15px; font-weight: 600; color: var(--ink-2); white-space: nowrap;
   text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 2px; text-decoration-color: var(--ink-3); }

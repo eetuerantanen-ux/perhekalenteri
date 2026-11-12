@@ -404,13 +404,46 @@
     if (currentView === "paiva" && !infoPopMode) stopIdleTimer();
   }
 
-  /* ---------- Muistutukset / Muistilista / Ruokalista: koko sisältö leijuvaan ikkunaan ---------- */
+  /* ---------- Tänään / Muistutukset / Muistilista / Ruokalista: koko sisältö leijuvaan ikkunaan ---------- */
   const CARD_LINK = (txt) => `<span class="card-link" aria-hidden="true"><span class="cl-txt">${esc(txt)}</span><span class="cl-arr">›</span></span>`;
-  const INFO_CARDS = { reminders: "muistutukset", todo: "muistilista", menu: "ruokalista" };
+  const INFO_CARDS = { today: "tanaan", reminders: "muistutukset", todo: "muistilista", menu: "ruokalista" };
   function daysFrom(todayKey, key) { return Math.round((midnight(key) - midnight(todayKey)) / 864e5); }
   function relDay(days) {
     if (days === 0) return "tänään"; if (days === 1) return "huomenna"; if (days === -1) return "eilen";
     return days > 0 ? `${days} pv päästä` : `${-days} pv sitten`;
+  }
+  function renderTodayPop(n) {
+    const key = hk(n).key, info = keyInfo(key);
+    const evs = eventsForDay(key);
+    const holidays = evs.filter(isHolidayEv);
+    const hol = holidays.map((e) => esc(e.otsikko)).join(" · ");
+    const dateStr = `${WD_LONG[info.wd].replace(/^./, (x) => x.toUpperCase())} ${info.d}. ${MON[info.m - 1]}`;
+    const fc = dayPriceBadge(key, key, "today");
+    const meta = `<span>${esc(dateStr)} · Viikko ${isoWeek(key)}</span>`
+      + (hol ? `<span class="holiday">${hol}</span>` : "")
+      + `<span>${evs.length ? `${evs.length} ${evs.length === 1 ? "merkintä" : "merkintää"}` : "ei merkintöjä"}</span>`
+      + fc;
+    if (!evs.length) return { title: "Tänään", meta, body: `<div class="ip-empty">Ei merkintöjä tälle päivälle.</div>` };
+    const longs = evs.filter((e) => e.long), timed = evs.filter((e) => !e.long);
+    let body = `<div class="dp-list">`;
+    for (const e of longs) {
+      const who = evWho(e);
+      const sub = [e.sub || "koko päivä", who, e.paikka, e.alustava ? "alustava" : ""].filter(Boolean).join(" · ");
+      body += `<div class="dp-banner${e.alustava ? " tent" : ""}" style="background:${evColor(e)}22;border-left:6px solid ${evColor(e)}">${esc(e.otsikko)}<span class="sub">${esc(sub)}</span></div>`;
+    }
+    let nowShown = false;
+    for (const e of timed) {
+      const past = e.b <= n, cur = e.a <= n && e.b > n;
+      if (!nowShown && !past) { body += `<div class="nowline">nyt ${hm(n)}</div>`; nowShown = true; }
+      const who = evWho(e);
+      const extra = [who, e.paikka, e.alustava ? "alustava" : ""].filter(Boolean).join(" · ");
+      body += `<div class="dp-ev${past ? " past" : ""}${cur ? " now" : ""}${e.alustava ? " tent" : ""}"><div class="t">${esc(evRange(e))}</div>
+        <div class="body" style="border-color:${evColor(e)}"><div class="title">${badges(e)}${esc(e.otsikko)}${puokkari(e)}</div>
+        ${extra ? `<div class="who">${esc(extra)}</div>` : ""}</div></div>`;
+    }
+    if (!nowShown && timed.length) body += `<div class="nowline">nyt ${hm(n)}</div>`;
+    body += `</div>`;
+    return { title: "Tänään", meta, body };
   }
   function remRowHtml(x, todayKey) {
     let d = "–", sm = "";
@@ -479,7 +512,10 @@
   function renderInfoPop() {
     if (!infoPopMode) return;
     const n = now();
-    const r = infoPopMode === "muistutukset" ? renderRemindersPop(n) : infoPopMode === "muistilista" ? renderTodoPop() : renderMenuPop(n);
+    const r = infoPopMode === "tanaan" ? renderTodayPop(n)
+      : infoPopMode === "muistutukset" ? renderRemindersPop(n)
+      : infoPopMode === "muistilista" ? renderTodoPop()
+      : renderMenuPop(n);
     $("infoPopTitle").textContent = r.title;
     $("infoPopMeta").innerHTML = r.meta;
     const body = $("infoPopBody"), keep = body.scrollTop;
@@ -583,7 +619,7 @@
     const key = hk(n).key;
     const evs = eventsForDay(key);
     const longs = evs.filter((e) => e.long), timed = evs.filter((e) => !e.long);
-    let html = `<div class="card-title">Tänään <small>${esc(shortDate(key))}</small>${dayPriceBadge(key, key, "today")}</div><div class="ev-list">`;
+    let html = `<div class="card-title">Tänään <small>${esc(shortDate(key))}</small>${dayPriceBadge(key, key, "today")}${CARD_LINK("kaikki")}</div><div class="ev-list">`;
     for (const e of longs) html += `<div class="banner${e.alustava ? " tent" : ""}" style="background:${evColor(e)}22;border-left:6px solid ${evColor(e)}">${esc(e.otsikko)}<span class="sub">${esc(e.sub || "koko päivä")} · ${esc(evWho(e))}</span></div>`;
     let nowShown = false, shown = 0;
     const MAX = Math.max(2, 7 - longs.length);
@@ -1023,7 +1059,7 @@
     if (e.target && e.target.closest && e.target.closest("[data-infopop-close]")) { e.preventDefault(); closeInfoPop(); return; }
     if (e.target && e.target.id === "infoPop") { closeInfoPop(); return; }
     if (e.target && e.target.closest && e.target.closest("#infoPop")) return;
-    const infoCard = currentView === "paiva" && e.target && e.target.closest && e.target.closest("#reminders, #todo, #menu");
+    const infoCard = currentView === "paiva" && e.target && e.target.closest && e.target.closest("#today, #reminders, #todo, #menu");
     if (infoCard && DATA) { e.preventDefault(); openInfoPop(INFO_CARDS[infoCard.id]); return; }
     if (e.target && e.target.closest && e.target.closest("#price")) { e.preventDefault(); const pl = e.target.closest("[data-pmode]"); openPricePop(pl ? pl.dataset.pmode : "spot"); return; }
     const cell = e.target.closest && e.target.closest("[data-day]");

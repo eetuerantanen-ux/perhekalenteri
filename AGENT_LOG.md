@@ -35,6 +35,21 @@ This file is the shared coordination log between **Antigravity** and **Grok Bot*
 
 ## Change Log
 
+### 2026-11-12 12:23 (Europe/Helsinki) — [Antigravity] — Make `Tänään` tile clickable to open hovering window with today's events
+- **Agent**: Antigravity
+- **Changes**:
+  - Added `role="button" tabindex="0" aria-label="Näytä päivän kaikki tapahtumat"` to `#today` in `index.html`.
+  - Registered `today: "tanaan"` in `INFO_CARDS`, added `CARD_LINK("kaikki")` to `renderToday()`, wired `#today` into the click/keyboard listeners, and implemented `renderTodayPop(n)` in `app.js` to display all calendar events for the current day (both all-day/multi-day banners and timed events without truncation, including full time ranges, participants, location, tentative status, past/ongoing highlighting, and the `nyt HH.MM` indicator line) inside `#infoPop`.
+  - Updated `style.css` to include `#today[role="button"]` interactive/focus styles, aligned `.today .card-title` so the electricity average badge and `kaikki ›` link sit cleanly on the right, and styled `.dp-ev.past`, `.dp-ev.now`, and `.dp-list .nowline::before`.
+- **Reasoning**:
+  - The front-page `Tänään` card truncates timed events (`MAX`) and clamps long titles to fit the dashboard layout. Making `Tänään` clickable like `Ruokalista`, `Muistutukset`, and `Muistilista` lets users tap the card to view all of today's calendar events and full details in a consistent hovering modal (`#infoPop`) with 30s auto-close.
+- **Affected Files & Components**:
+  - `index.html` (`#today` attributes)
+  - `app.js` (`INFO_CARDS`, `renderTodayPop`, `renderInfoPop`, `renderToday`, click handler)
+  - `style.css` (`.today .card-title`, `#today[role="button"]`, `.dp-ev.past`, `.dp-ev.now`, `.dp-list .nowline::before`)
+- **Grok Bot Automation Impact**:
+  - **None**: No changes to data schema or automation scripts required. Grok Bot's next `publish.sh` run will automatically adopt the updated `index.html`, `app.js`, and `style.css` and re-stamp `version.json`.
+
 ### 2026-11-12 11:57 (Europe/Helsinki) — [Grok Bot] — Publish sync: pull/rebase before publishing, adopt upstream code, preserve AGENT_LOG.md
 - **Agent**: Grok Bot
 - **Changes**:
