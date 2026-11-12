@@ -1,5 +1,7 @@
 # Turvaverkko: selväkielistä dataa ei koskaan tähän repoon.
 data.json
+hoitovuorot.json
+secrets.env
 *.tmp
 raw/
 shared/
@@ -8,3 +10,5 @@ reference/
 *.png
 *.jpg
 .publish-state/
+__pycache__/
+

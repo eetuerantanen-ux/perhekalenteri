@@ -40,6 +40,46 @@ This file is the shared coordination log between **Antigravity** and **Grok Bot*
 
 ## Change Log
 
+### 2026-11-12 14:38 (Europe/Helsinki) — [Antigravity] — Encrypt daycare shifts as `hoitovuorot.enc.json` (`AES-256-GCM`) in `fetch-evaka.py` and gitignore plaintext `hoitovuorot.json`
+- **Agent**: Antigravity
+- **Changes**:
+  - Updated `fetch-evaka.py` so that **plaintext `hoitovuorot.json` is never written to or committed in the public repository**:
+    1. Encrypts the fetched daycare shifts (`[{lapsi, pvm, alku, loppu}]`) into **`hoitovuorot.enc.json`** using the exact same `AES-256-GCM` + `PBKDF2-SHA256` (`iter: 1000000`, 16-byte `salt`, fresh 12-byte random `iv`) envelope format and `FAMILY_PLANNER_PASSWORD` as `data.enc.json` (implemented via Python's built-in `hashlib.pbkdf2_hmac` + OpenSSL `libcrypto` via `ctypes`, so no third-party `pip` packages are needed on Raspberry Pi).
+    2. Reads baseline comparison state from `.publish-state/hoitovuorot.sent.json` (gitignored) or by decrypting `hoitovuorot.enc.json` in place.
+    3. Commits and pushes **only** `hoitovuorot.enc.json` (`git commit -m "Hoitovuorot (salattu) YYYY-MM-DD HH:MM"`), with an explicit safety guard that refuses to `git add`/`commit` any file not ending in `.enc.json`, and automatically deletes any leftover plaintext `hoitovuorot.json` in the repo root.
+    4. Added `--decrypt` (prints decrypted JSON to stdout) and `--decrypt-to PATH` (atomically writes decrypted JSON to `PATH`, e.g., `shared/hoitovuorot.json`) CLI flags using `FAMILY_PLANNER_PASSWORD`.
+  - Updated `.gitignore` to explicitly ignore `hoitovuorot.json` and `secrets.env`.
+- **Usage & CLI Flags (Raspberry Pi & Grok Bot)**:
+  - Required in Raspberry Pi's `secrets.env` (alongside `EVAKA_USERNAME`, `EVAKA_PASSWORD`, `GROK_WEBHOOK_URL`, `GROK_WEBHOOK_KEY`, and optional `GITHUB_TOKEN`):
+    ```dotenv
+    FAMILY_PLANNER_PASSWORD=<same password used for data.enc.json>
+    ```
+  - Default cron run on Raspberry Pi (fetches shifts; if changed, encrypts `hoitovuorot.enc.json`, commits & pushes to `origin/main`, and triggers webhook):
+    ```bash
+    python3 fetch-evaka.py
+    ```
+  - Decrypt `hoitovuorot.enc.json` into `shared/hoitovuorot.json` (for Grok Bot's `publish.sh` / `collect.py` or local inspection):
+    ```bash
+    python3 fetch-evaka.py --out-shifts publish/hoitovuorot.enc.json --decrypt-to shared/hoitovuorot.json
+    ```
+- **Reasoning**:
+  - Because `eetuerantanen-ux/perhekalenteri` is a public repository, committing plaintext `hoitovuorot.json` would expose children's names and daycare shift hours in the repository and git history (and trigger `check_plaintext.py`). Encrypting `hoitovuorot.enc.json` with `AES-256-GCM` + `PBKDF2-SHA256` (1,000,000 iterations) provides the same cryptographic protection as `data.enc.json`.
+- **Affected Files & Components**:
+  - `fetch-evaka.py`
+  - `.gitignore`
+  - `AGENT_LOG.md`
+- **Grok Bot Automation Impact**:
+  - **Required (`publish.sh` / `collect.py`)**:
+    1. In `publish.sh` (after `git fetch` + `rebase origin/main` and before running `collect.py`), if `publish/hoitovuorot.enc.json` exists, decrypt it into `shared/hoitovuorot.json`:
+       ```bash
+       if [ -f "$PUB/hoitovuorot.enc.json" ]; then
+         python3 "$PUB/fetch-evaka.py" --out-shifts "$PUB/hoitovuorot.enc.json" --decrypt-to "$ROOT/shared/hoitovuorot.json"
+       fi
+       ```
+    2. In `publish.sh`'s `.gitignore` heredoc, add `hoitovuorot.json` and `secrets.env` alongside `data.json` so they remain gitignored on future publishes.
+- **Publish Status**:
+  - **Published via webhook**: NO (script + `.gitignore` + documentation update only; no frontend UI/code change).
+
 ### 2026-11-12 14:02 (Europe/Helsinki) — [Antigravity] — Default `fetch-evaka.py` to git commit `hoitovuorot.json` + call publish webhook (with webhook-payload backup)
 - **Agent**: Antigravity
 - **Changes**:
