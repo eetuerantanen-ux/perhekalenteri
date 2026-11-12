@@ -40,6 +40,28 @@ This file is the shared coordination log between **Antigravity** and **Grok Bot*
 
 ## Change Log
 
+### 2026-11-12 15:03 (Europe/Helsinki) — [Grok Bot] — Published iltapala meal rule + invisible dynamic scrolling; publish.sh now decrypts `hoitovuorot.enc.json`
+- **Agent**: Grok Bot
+- **Changes**:
+  - **Published to GitHub Pages** (version `d063d2fe58`) the following frontend changes (developed in `site-dev/`, copied to `site/`; `site/`==`origin` before copy, so no upstream code lost):
+    1. **Iltapala meal rule** (`app.js` `mealKids`): a meal is shown for a child only if the care shift actually covers that meal's serving time (start AND end). A short evening shift (e.g. 19:30-20:30, parent handover) now correctly shows **only Iltapala**, not Paivallinen. Verified live on the real eVaka data for 2026-11-01 and 2026-11-21 (day-popup meals = `["Iltapala"]` only).
+    2. **Invisible, dynamic scrolling + fade hint** (`app.js`, `style.css`): day-view cards (Saa, Tanaan, Ruokalista, Tulevat paivat, Muistutukset, Muistilista), popup bodies, and week/month day cells scroll when content overflows, with **no visible scrollbar** (scrollbar-width:none + ::-webkit-scrollbar display:none), touch/drag + mouse-wheel support, and the page itself does not bounce (body overscroll-behavior:none). A soft bottom fade (`.has-more::after`) appears only while more content is below (toggled via scroll + ResizeObserver). A scroll drag no longer opens a card's popup (pointer move >10px suppresses the tap). Muistilista text no longer ellipsis-truncates (wraps + scrolls).
+  - **Pipeline (`publish.sh`)** - handles Antigravity's encrypted `hoitovuorot.enc.json`:
+    1. Before `collect.py`, if `origin/main:hoitovuorot.enc.json` exists it is decrypted with `fetch-evaka.py --decrypt-to shared/hoitovuorot.json` using `FAMILY_PLANNER_PASSWORD` (same key/envelope as `data.enc.json`).
+    2. **Arjen apuri's `shared/hoitovuorot.json` is kept as fallback**; the **newer source wins** (enc git-commit time vs `shared/hoitovuorot.json` mtime). The previous file is backed up to `.publish-state/` before overwrite. Decrypt/missing-file failures keep the fallback and never fail the publish.
+    3. Hardened the published-repo `.gitignore` heredoc with `hoitovuorot.json` and `secrets.env`.
+- **Reasoning**:
+  - eVaka shifts are now encrypted at rest in the public repo, so the publish pipeline must decrypt them locally to feed `collect.py`, while preserving the Arjen apuri fallback and preferring whichever source is newer.
+- **Security note (plaintext check)**:
+  - Verified: **no plaintext `hoitovuorot.json` has ever been committed** to `origin/main` in the current tree or anywhere in git history (scanned all commit trees across all refs). Nothing to remediate.
+- **Affected Files & Components**:
+  - `site/index.html` (unchanged), `site/app.js`, `site/style.css`, `version.json` (`d063d2fe58`), `data.enc.json`
+  - `publish.sh` (decrypt step + `.gitignore` hardening). `collect.py` unchanged (still reads `shared/hoitovuorot.json`).
+- **Grok Bot Automation Impact**:
+  - **Implemented** the `publish.sh` decrypt-and-prefer-newer step. **No new automation created.**
+- **Publish Status**:
+  - **Published via webhook**: YES (webhook-triggered routine published the code at commit `283c20d`; manual `publish.sh` re-run confirmed no further delta). Live version: `d063d2fe58`.
+
 ### 2026-11-12 14:38 (Europe/Helsinki) — [Antigravity] — Encrypt daycare shifts as `hoitovuorot.enc.json` (`AES-256-GCM`) in `fetch-evaka.py` and gitignore plaintext `hoitovuorot.json`
 - **Agent**: Antigravity
 - **Changes**:
