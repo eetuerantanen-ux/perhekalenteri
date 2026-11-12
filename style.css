@@ -539,3 +539,46 @@ body.night .pc-bar.p-orange { fill: #d47220; } body.night .pc-bar.p-red { fill: 
 /* kapea Muistilista-kortti: pelkkä nuoli-merkki */
 #todo .card-link .cl-txt { display: none; }
 #todo .card-link .cl-arr { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: var(--card-2); border: 1.5px solid var(--line); font-size: 20px; color: var(--ink-2); }
+
+/* ---------- Näkymätön, dynaaminen scrollaus + reunahäive (t38u) ---------- */
+/* Koko sivu ei scrollaa/kimpoa tabletilla. */
+body { overscroll-behavior: none; }
+
+/* Piilota scrollbar kaikilta scrollialueilta (Firefox/IE + WebKit/Blink). */
+.scroll-hide { scrollbar-width: none; -ms-overflow-style: none; }
+.scroll-hide::-webkit-scrollbar { width: 0; height: 0; display: none; }
+
+/* Päivänäkymän kortti: otsikko pysyy, loppu scrollaa kun ei mahdu. */
+.has-scroll { display: flex; flex-direction: column; }
+.has-scroll > .card-title { flex: none; }
+.card-scroll {
+  flex: 1 1 auto; min-height: 0;
+  display: flex; flex-direction: column;
+  overflow-y: auto; overflow-x: hidden;
+  -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
+}
+/* Sisäkkäiset kääreet eivät saa itse leikata, kun kortti hoitaa scrollin. */
+.card-scroll > .ev-list,
+.card-scroll > .days,
+.card-scroll > .meals { overflow: visible; flex: 0 0 auto; min-height: 0; }
+.card-scroll > .days > .day { flex: 0 0 auto; }
+
+/* Muistilista: koko teksti näkyviin (ei ...-katkaisua) – rivittyy ja scrollaa. */
+.card-scroll .todo-item .txt { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
+
+/* Reunahäive: pehmeä liukuväri alas, kun sisältöä on vielä lisää. */
+.card, .daypop-card { position: relative; }
+.card { --fade-bg: var(--card); }
+.daypop-card { --fade-bg: var(--card); }
+.has-more::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0;
+  height: 30px; pointer-events: none; z-index: 3; border-radius: inherit;
+  background: linear-gradient(to bottom, rgba(0,0,0,0), var(--fade-bg));
+  transition: opacity .18s ease;
+}
+
+/* Viikko-/kuukausisolujen listat scrollattaviksi (scrollbar piilossa). */
+.wv-list, .m-pills {
+  overflow-y: auto; overflow-x: hidden;
+  -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
+}

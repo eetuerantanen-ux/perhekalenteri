@@ -20,6 +20,8 @@
 
   let DATA = null, lastFetchOk = true, lastFetchAt = null, PRICES = null, FORECAST = null;
   let currentView = "paiva", idleTimer = null, openDayKey = null, pricePopOpen = false, infoPopMode = null;
+  // Scrollaus (t38u): veto vs. napautus + reunahäive-rekisteri.
+  let _ptrDown = null, _ptrDragged = false, _scrollRegs = [];
   const PRICES_URL = (LOCAL_DEV && params.get("hinnat")) || "prices.json"; // ?hinnat= vain paikalliseen testaukseen
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -146,13 +148,16 @@
     const at = (h, m) => day0 + (h * 60 + m) * 60000;
     const kids = [];
     const add = (who) => { for (const k of who || []) if (!kids.includes(k)) kids.push(k); };
+    // Ateria näytetään vain, jos hoitoaika oikeasti kattaa aterian tarjoiluhetken (start JA end huomioiden).
+    // Näin lyhyt iltavuoro (esim. 19.30–20.30, vanhempien vaihto) näyttää vain iltapalan, ei päivällistä.
     for (const e of shifts) {
+      const start = e.a.getTime(), end = e.b.getTime();
       let ok = false;
-      if (mealName === "Aamupala") ok = Math.max(e.a.getTime(), day0) <= at(8, 0);
-      else if (mealName === "Lounas") ok = e.a.getTime() < at(11, 30) && e.b.getTime() > at(11, 0);
-      else if (mealName === "Välipala") ok = e.b.getTime() > at(14, 0);
-      else if (mealName === "Päivällinen") ok = e.b.getTime() > at(17, 0);
-      else if (mealName === "Iltapala") ok = e.b.getTime() > at(20, 0) || e.b.getTime() > next;
+      if (mealName === "Aamupala") ok = Math.max(start, day0) <= at(8, 0);                 // aamupala: hoito alkaa klo 8 tai ennen
+      else if (mealName === "Lounas") ok = start < at(11, 30) && end > at(11, 0);          // lounas tarjoillaan ~11.00–11.30
+      else if (mealName === "Välipala") ok = start < at(14, 30) && end > at(14, 0);        // välipala ~14.00–14.30
+      else if (mealName === "Päivällinen") ok = start < at(17, 30) && end > at(17, 0);     // päivällinen ~17.00–17.30 (yön yli: vain jos alkoi klo 17.30 mennessä)
+      else if (mealName === "Iltapala") ok = (start < at(20, 0) && end > at(19, 30)) || end > next; // iltapala ~19.30–20.00 tai yön yli
       if (ok) add(e.henkilot);
     }
     return kids;
@@ -388,6 +393,7 @@
     $("pricePop").classList.toggle("is-fc", pricePopMode === "fc");
     const n = now();
     if (pricePopMode === "fc") renderFcPop(n, body, meta); else renderSpotPop(n, body, meta);
+    enhanceScrollAll();
   }
   function openPricePop(mode) {
     if (openDayKey) closeDayPop();
@@ -395,6 +401,7 @@
     pricePopOpen = true;
     renderPricePop();
     const pop = $("pricePop"); if (pop) pop.hidden = false;
+    enhanceScrollAll();
     startIdleTimer();
   }
   function closePricePop() {
@@ -522,6 +529,7 @@
     body.innerHTML = r.body;
     body.scrollTop = keep;
     $("infoPop").dataset.mode = infoPopMode;
+    enhanceScrollAll();
   }
   function openInfoPop(mode) {
     if (openDayKey) closeDayPop();
@@ -530,6 +538,7 @@
     $("infoPopBody").scrollTop = 0;
     renderInfoPop();
     $("infoPop").hidden = false;
+    enhanceScrollAll();
     if (mode === "ruokalista") { // vieritä tähän päivään (kuluvan viikon loppu korostettuna)
       const t = $("ipToday"), body = $("infoPopBody");
       if (t && t.offsetTop > body.clientHeight * 0.5) body.scrollTop = t.offsetTop - 8;
@@ -779,6 +788,7 @@
       html += `<div class="${cls}" data-day="${key}"><div class="wd-head"><span class="wd-name">${esc(WD[info.wd])}</span><span class="wd-num">${info.d}.</span></div>${wx}<div class="wv-list">${list}</div>${meals}</div>`;
     }
     el.innerHTML = html;
+    enhanceScrollAll();
   }
 
   function renderMonth(n) {
@@ -815,6 +825,7 @@
       }
     }
     el.innerHTML = html;
+    enhanceScrollAll();
   }
 
   /* ---------- haetun dataikkunan rajat (ei keksitä tapahtumia) ---------- */
@@ -911,6 +922,7 @@
     }
 
     body.innerHTML = html;
+    enhanceScrollAll();
   }
   function openDayPop(key) {
     if (!key) return;
@@ -918,6 +930,7 @@
     renderDayPop(key);
     const pop = $("dayPop");
     if (pop) pop.hidden = false;
+    enhanceScrollAll();
     bumpIdle();
   }
   function closeDayPop() {
@@ -972,6 +985,7 @@
     if (openDayKey) renderDayPop(openDayKey);
     if (pricePopOpen) renderPricePop();
     if (infoPopMode) renderInfoPop();
+    enhanceScrollAll();
   }
 
   /* ---------- salaus: AES-GCM + PBKDF2 (WebCrypto) ---------- */
@@ -1060,10 +1074,10 @@
     if (e.target && e.target.id === "infoPop") { closeInfoPop(); return; }
     if (e.target && e.target.closest && e.target.closest("#infoPop")) return;
     const infoCard = currentView === "paiva" && e.target && e.target.closest && e.target.closest("#today, #reminders, #todo, #menu");
-    if (infoCard && DATA) { e.preventDefault(); openInfoPop(INFO_CARDS[infoCard.id]); return; }
-    if (e.target && e.target.closest && e.target.closest("#price")) { e.preventDefault(); const pl = e.target.closest("[data-pmode]"); openPricePop(pl ? pl.dataset.pmode : "spot"); return; }
+    if (infoCard && DATA) { if (_ptrDragged) return; e.preventDefault(); openInfoPop(INFO_CARDS[infoCard.id]); return; }
+    if (e.target && e.target.closest && e.target.closest("#price")) { if (_ptrDragged) return; e.preventDefault(); const pl = e.target.closest("[data-pmode]"); openPricePop(pl ? pl.dataset.pmode : "spot"); return; }
     const cell = e.target.closest && e.target.closest("[data-day]");
-    if (cell && (currentView === "viikko" || currentView === "kuukausi")) { openDayPop(cell.dataset.day); return; }
+    if (cell && (currentView === "viikko" || currentView === "kuukausi")) { if (_ptrDragged) return; openDayPop(cell.dataset.day); return; }
     if (e.target && e.target.closest && e.target.closest("[data-back]")) { e.preventDefault(); setView("paiva"); }
   });
   document.querySelector(".view-nav")?.addEventListener("click", (e) => {
@@ -1082,6 +1096,70 @@
     else if ((e.key === "Enter" || e.key === " ") && e.target && INFO_CARDS[e.target.id] && DATA) { e.preventDefault(); openInfoPop(INFO_CARDS[e.target.id]); }
     else if ((e.key === "Enter" || e.key === " ") && e.target && e.target.id === "price") { e.preventDefault(); openPricePop(); }
   }, true);
+
+  /* ---------- Näkymätön, dynaaminen scrollaus + reunahäive (t38u) ----------
+     Kiinteäkokoisten laatikoiden sisältö scrollaa, kun se ei mahdu: ei scrollbaria,
+     kosketus-/hiirirullatuki, ja pehmeä reunahäive kertoo, että sisältöä on lisää.
+     Toimii dynaamisesti: ajetaan jokaisen renderöinnin jälkeen + ResizeObserver. */
+  const SCROLL_CARDS = ["weather", "today", "menu", "upcoming", "reminders", "todo"];
+  const _scrollRO = ("ResizeObserver" in window)
+    ? new ResizeObserver(() => { for (const r of _scrollRegs) updateScrollHint(r.el, r.fade); })
+    : null;
+  function updateScrollHint(el, fade) {
+    if (!el || !fade) return;
+    const over = el.scrollHeight - el.clientHeight > 2;
+    const atEnd = el.scrollTop + el.clientHeight >= el.scrollHeight - 2;
+    fade.classList.toggle("has-more", over && !atEnd);
+  }
+  function makeScroll(el, fade) {
+    if (!el) return;
+    el.classList.add("scroll-hide");
+    if (!el.dataset.scrollInit) {
+      el.dataset.scrollInit = "1";
+      el.addEventListener("scroll", () => updateScrollHint(el, el._fade), { passive: true });
+    }
+    el._fade = fade || null;
+    _scrollRegs.push({ el, fade: fade || null });
+    if (_scrollRO) { try { _scrollRO.observe(el); if (el.firstElementChild) _scrollRO.observe(el.firstElementChild); } catch (e) {} }
+    updateScrollHint(el, fade || null);
+  }
+  function enhanceScrollAll() {
+    if (_scrollRO) _scrollRO.disconnect();
+    _scrollRegs = [];
+    // 1) Päivänäkymän kortit: kääri otsikon jälkeinen sisältö scrollialueeseen.
+    for (const id of SCROLL_CARDS) {
+      const card = $(id);
+      if (!card) continue;
+      const title = card.querySelector(":scope > .card-title");
+      let sc = card.querySelector(":scope > .card-scroll");
+      if (!sc) {
+        sc = document.createElement("div");
+        sc.className = "card-scroll";
+        const rest = Array.from(card.childNodes).filter((nd) => nd !== title);
+        rest.forEach((nd) => sc.appendChild(nd));
+        if (title) title.after(sc); else card.appendChild(sc);
+      }
+      card.classList.add("has-scroll");
+      makeScroll(sc, card);
+    }
+    // 2) Popup-rungot: reunahäive itse korttiin, scrollbar piiloon.
+    for (const sel of ["#dayPop", "#infoPop", "#pricePop"]) {
+      const pop = document.querySelector(sel);
+      if (!pop || pop.hidden) continue;
+      const body = pop.querySelector(".daypop-body");
+      if (body) makeScroll(body, pop.querySelector(".daypop-card"));
+    }
+    // 3) Viikko-/kuukausisolut: listat scrollattaviksi (ilman reunahäivettä, tilaa niukasti).
+    document.querySelectorAll("#weekGrid .wv-list").forEach((el) => makeScroll(el, null));
+    document.querySelectorAll("#monthGrid .m-pills").forEach((el) => makeScroll(el, null));
+  }
+  // Veto (scroll) ei saa avata popupia: erota napautus vedosta.
+  document.addEventListener("pointerdown", (e) => { _ptrDown = { x: e.clientX, y: e.clientY }; _ptrDragged = false; }, true);
+  document.addEventListener("pointermove", (e) => {
+    if (!_ptrDown) return;
+    if (Math.abs(e.clientX - _ptrDown.x) > 10 || Math.abs(e.clientY - _ptrDown.y) > 10) _ptrDragged = true;
+  }, true);
+  window.addEventListener("resize", () => { for (const r of _scrollRegs) updateScrollHint(r.el, r.fade); });
 
   // Kello tikittää sekunnin välein, muu näkymä päivittyy minuutin välein, data 5 min välein.
   renderHeader(now());
