@@ -56,6 +56,24 @@ This file is the shared coordination log between **Antigravity** and **Grok Bot*
 
 ## Change Log
 
+### 2026-11-12 23:38 (Europe/Helsinki) — [Grok Bot] — Stop 30-min Aromi14 polling; decrypt weekly `ruokalistat.enc.json` and hourly `muistilista.enc.json` in `publish.sh`
+
+- **Agent**: Grok Bot
+- **Changes**:
+  - **`publish.sh`**: Before `collect.py`, decrypts freshly fetched `origin/main:ruokalistat.enc.json` (`fetch-menus.py --out-menus … --decrypt-to shared/ruokalistat.json`) and `origin/main:muistilista.enc.json` (`fetch-keep.py --out-todo … --decrypt-to shared/muistilista.json`), mirroring the existing `hoitovuorot.enc.json` handling. The newer source wins (enc git-commit time vs. shared-file mtime). The previous shared file is backed up to `.publish-state/` before overwrite. Decrypt, missing-file, or missing-script failures keep the fallback and never fail the publish (if the decrypt script is not yet in `publish/`, it is taken from `origin/main`). Hardened the published-repo `.gitignore` heredoc with `ruokalistat.json`, `muistilista.json`, `muistutukset.json`, `.venv/`, `__pycache__/`, and `*.pyc`.
+  - **`collect.py`**: `menus()` now reads `shared/ruokalistat.json` (same schema/roles: Lehvätien päiväkoti `arki`, Jaakonpuiston päiväkoti `vuoro`). Live Aromi14 fetching runs only if that file is missing or unreadable. Meal rules unchanged.
+  - **Docs**: `fetch-notes.md` and `README.md` no longer say menus are fetched every 30 minutes; they describe the Raspberry Pi weekly/hourly encrypted files and the `publish.sh` decrypt step.
+  - **Verified** on a normal `publish.sh` run: exit 0, commit `e45340e`, live `data.enc.json` updated. Version remains `aa5d0ab364` (no frontend code change). Decrypted `data.enc.json` contains both daycare menus (Lehvatienpk 38 days, Jaakonpuistonpk 57 days) and `muistilista` (`tila=ok`, 2 items). The run made **no Aromi14 requests**. Plaintext JSONs live only in `shared/` (outside `publish/`); `git add` in `publish/` ignores them via `.gitignore` (confirmed with decoy files).
+- **Reasoning**:
+  - Daycare menus now arrive weekly from the Raspberry Pi as encrypted `ruokalistat.enc.json`, and the todo list hourly as `muistilista.enc.json`. The 30-minute refresh should decrypt those files for `collect.py` and stop polling Aromi14 on every run.
+- **Affected Files & Components**:
+  - `publish.sh`, `collect.py`, `fetch-notes.md`, `README.md`, `data.enc.json`
+  - `site/index.html`, `site/app.js`, `site/style.css`, `version.json` unchanged (`aa5d0ab364`)
+- **Grok Bot Automation Impact**:
+  - **Implemented** the `publish.sh` decrypt-and-prefer-newer steps and the `collect.py` shared-file read. **No new automation created.** The existing 30-min routine still runs `publish.sh`, which now performs the decrypts; Aromi14 polling is removed from that cycle.
+- **Publish Status**:
+  - **Published via webhook**: NO (manual `publish.sh` run after this AGENT_LOG request; data published at commit `e45340e`). Live version: `aa5d0ab364`.
+
 ### 2026-11-12 23:14 (Europe/Helsinki) — [Antigravity] — Move daycare food menu fetching (`Lehvätien päiväkoti` & `Jaakonpuiston päiväkoti`) to weekly Tuesday 14:00 Raspberry Pi job (`fetch-menus.py` -> `ruokalistat.enc.json`) & activate `fetch-keep.py`
 - **Agent**: Antigravity
 - **Changes**:
