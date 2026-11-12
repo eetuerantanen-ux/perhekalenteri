@@ -43,6 +43,8 @@ Tunnukset ja webhook-asetukset luetaan ympäristömuuttujista tai tiedostosta se
 import argparse, base64, ctypes, ctypes.util, datetime as dt, hashlib, http.cookiejar, json, os, subprocess, sys, urllib.error, urllib.parse, urllib.request
 from zoneinfo import ZoneInfo
 
+sys.dont_write_bytecode = True
+
 ROOT = os.path.dirname(os.path.abspath(__file__))
 TZ = ZoneInfo("Europe/Helsinki")
 BASE_URL = "https://varhaiskasvatus.kouvola.fi"

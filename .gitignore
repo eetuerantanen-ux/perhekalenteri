@@ -10,3 +10,5 @@ reference/
 *.png
 *.jpg
 .publish-state/
+__pycache__/
+*.pyc

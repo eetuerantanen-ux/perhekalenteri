@@ -19,6 +19,21 @@ This file is the shared coordination log between **Antigravity** and **Grok Bot*
 
 ---
 
+## Current Data & Automation Schedule (Europe/Helsinki)
+
+| Routine | Run by | Schedule | Exact steps / commands |
+|---|---|---|---|
+| Perhekalenterin päivitys | Tekninen automaatiobotti (Grok Bot) | every 30 min, 06:00–22:00 (and on webhook trigger) | sync `publish/` from `origin/main` → if `publish/hoitovuorot.enc.json` exists and is newer than `shared/hoitovuorot.json`, decrypt to `shared/hoitovuorot.json` (`python3 publish/fetch-evaka.py --out-shifts publish/hoitovuorot.enc.json --decrypt-to shared/hoitovuorot.json`, keeping Arjen apuri's `shared/hoitovuorot.json` as fallback) → fetch 4 Google calendars → `python3 collect.py` → `bash publish.sh` |
+| Pörssisähkön hinnat | Tekninen automaatiobotti (Grok Bot) | daily 16:00 | `python3 fetch-prices.py` (internally runs `python3 fetch-forecast.py --out publish/forecast.json`) |
+| Muistilista (Google Keep) | Arjen apuri (Grok Bot) | hourly 07:00–21:00 | writes `shared/muistilista.json` (`[{teksti, tehty}]`) from Keep note "Muistilista" (box browser) |
+| Muistutukset (eVaka) | Arjen apuri (Grok Bot) | hourly on weekdays 07:00–19:00 | writes `shared/muistutukset.json` (eVaka, read-only; fields `otsikko`, `pvm`, `lapsi`, `lahde`) |
+| Muistutukset (email) | Arjen apuri (Grok Bot) | hourly 08:00–21:00 | appends to `shared/muistutukset.json` from `eetu.org` email (`lahde="sähköposti"`) |
+| **Hoitovuorot (eVaka)** | **Raspberry Pi (`fetch-evaka.py`) + Arjen apuri fallback** | **Scheduled cron on Pi** | Logs into `varhaiskasvatus.kouvola.fi` citizen API (`EVAKA_USERNAME` + `EVAKA_PASSWORD`), fetches 2-month care shifts (`[{lapsi, pvm, alku, loppu}]`), compares against `.publish-state/hoitovuorot.sent.json` / `hoitovuorot.enc.json`, and if changed: encrypts with `AES-256-GCM` (`PBKDF2-SHA256`, 1,000,000 iterations, `FAMILY_PLANNER_PASSWORD`) to **`hoitovuorot.enc.json`**, commits & pushes `hoitovuorot.enc.json` to `origin/main`, and calls Grok Bot's publish webhook (`hoitovuorot_enc` + `hoitovuorot` + `diff` in POST JSON body). `publish.sh` decrypts `hoitovuorot.enc.json` into `shared/hoitovuorot.json` (newer source wins vs. Arjen apuri fallback) |
+| Antigravity / Pi julkaisu (webhook) | Koodaribotti (Grok Bot) | on demand | webhook triggers `publish.sh` (decrypts `hoitovuorot.enc.json` → `shared/hoitovuorot.json` → `collect.py` → `data.enc.json`) |
+| Tablet version check | tablet browser | data every 5 min; full reload every 6 h | `app.js checkVersion()` fetches `version.json` and reloads when the version changes |
+
+---
+
 ## Entry Template
 
 ```markdown
@@ -39,6 +54,27 @@ This file is the shared coordination log between **Antigravity** and **Grok Bot*
 ---
 
 ## Change Log
+
+### 2026-11-12 15:05 (Europe/Helsinki) — [Antigravity] — Document end-to-end encrypted daycare shift update flow (`hoitovuorot.enc.json`) in `AGENT_LOG.md` & prevent `.pyc` commits
+- **Agent**: Antigravity
+- **Changes**:
+  - Added the **Current Data & Automation Schedule** reference section at the top of `AGENT_LOG.md` and updated the historical schedule table below so both agents have the exact, verified end-to-end flow for how daycare shifts (`Hoitovuorot`) are now updated:
+    1. **Raspberry Pi (`fetch-evaka.py`)**: Fetches care shifts directly from eVaka's citizen API (`varhaiskasvatus.kouvola.fi`) for the 2-month calendar window (`[{lapsi, pvm, alku, loppu}]`).
+    2. **Diff & Encryption**: Compares shifts in the active window against `.publish-state/hoitovuorot.sent.json` (or decrypted `hoitovuorot.enc.json`). When changes occur, encrypts the shifts into **`hoitovuorot.enc.json`** using `AES-256-GCM` + `PBKDF2-SHA256` (`iter: 1000000`, `FAMILY_PLANNER_PASSWORD`) — identical to `data.enc.json` — so plaintext shifts are never exposed in the public repository.
+    3. **Git Push + Webhook Trigger**: Commits and pushes `hoitovuorot.enc.json` to `origin/main` (verified live in commit `7c7e29c`) and immediately POSTs to Grok Bot's publish webhook with both `hoitovuorot_enc` and `hoitovuorot` / `diff` in the JSON payload.
+    4. **Grok Bot Consumption (`publish.sh` / `collect.py`)**: On webhook trigger or 30-min cycle, Grok Bot pulls `origin/main`, decrypts `publish/hoitovuorot.enc.json` into `shared/hoitovuorot.json` (`python3 publish/fetch-evaka.py --out-shifts publish/hoitovuorot.enc.json --decrypt-to shared/hoitovuorot.json`, preferring whichever of `hoitovuorot.enc.json` vs. Arjen apuri's `shared/hoitovuorot.json` is newer), and runs `collect.py` + `encrypt.js` to publish the updated `data.enc.json`.
+  - Added `sys.dont_write_bytecode = True` to `fetch-evaka.py`, removed `__pycache__/fetch-evaka.cpython-313.pyc` from git tracking (`git rm -r --cached __pycache__`), and added `__pycache__/` and `*.pyc` to `.gitignore`.
+- **Reasoning**:
+  - Ensures `AGENT_LOG.md` clearly documents the new daycare shift update architecture (replacing the old "cadence not documented" note) and prevents Python bytecode files from being committed when `publish.sh` runs `fetch-evaka.py --decrypt-to` followed by `git add -A`.
+- **Affected Files & Components**:
+  - `AGENT_LOG.md`
+  - `fetch-evaka.py` (`sys.dont_write_bytecode = True`)
+  - `.gitignore` (`__pycache__/`, `*.pyc`)
+  - Removed tracked `__pycache__/fetch-evaka.cpython-313.pyc`
+- **Grok Bot Automation Impact**:
+  - **Optional minor `.gitignore` tweak in `publish.sh`**: Add `__pycache__/` and `*.pyc` to `publish.sh`'s `.gitignore` heredoc (though `sys.dont_write_bytecode = True` in `fetch-evaka.py` already prevents `.pyc` generation).
+- **Publish Status**:
+  - **Published via webhook**: NO (documentation + repo hygiene update only).
 
 ### 2026-11-12 15:03 (Europe/Helsinki) — [Grok Bot] — Published iltapala meal rule + invisible dynamic scrolling; publish.sh now decrypts `hoitovuorot.enc.json`
 - **Agent**: Grok Bot
@@ -176,11 +212,11 @@ This file is the shared coordination log between **Antigravity** and **Grok Bot*
 | Muistilista (Google Keep) | Arjen apuri | hourly 07:00–21:00 | writes `shared/muistilista.json` (`[{teksti, tehty}]`) from Keep note "Muistilista" (box browser) |
 | Muistutukset (eVaka) | Arjen apuri | hourly on weekdays 07:00–19:00 | writes `shared/muistutukset.json` (eVaka, read-only; fields otsikko, pvm, lapsi, lahde) |
 | Muistutukset (email) | Arjen apuri | hourly 08:00–21:00 | appends to `shared/muistutukset.json` from eetu.org email (lahde="sähköposti") |
-| Hoitovuorot | Arjen apuri | **cadence not documented — verify with Arjen apuri/Eetu** | writes `shared/hoitovuorot.json` (`[{lapsi, pvm, alku, loppu}]`) |
+| Hoitovuorot | Raspberry Pi (`fetch-evaka.py`) + Grok Bot (`publish.sh`) | Scheduled cron on Pi + webhook trigger | Pi fetches eVaka shifts → encrypts `hoitovuorot.enc.json` (`AES-256-GCM`) → commits & pushes to `origin/main` → calls Grok Bot webhook → `publish.sh` decrypts to `shared/hoitovuorot.json` (`[{lapsi, pvm, alku, loppu}]`) |
 | Antigravity-julkaisu (webhook) | Koodaribotti | on demand | webhook triggers a publish; URL/key live only in the Grok Bot app (not exportable) |
 | Tablet version check | tablet browser | data every 5 min; full reload every 6 h | `app.js checkVersion()` fetches `version.json` and reloads when the version changes |
 
-- **Verification**: Tekninen automaatiobotti's two routines and the webhook owner are verified against repo notes (`fetch-notes.md`, `README.md`) and Grok Bot's own records. Arjen apuri's Keep/eVaka/email cadences come from Grok Bot's records (not independently verifiable from repo files). The **hoitovuorot.json cadence is unverified** — not found in any file or note; flagged for confirmation.
+- **Verification**: Tekninen automaatiobotti's two routines and the webhook owner are verified against repo notes (`fetch-notes.md`, `README.md`) and Grok Bot's own records. Arjen apuri's Keep/eVaka/email cadences come from Grok Bot's records (not independently verifiable from repo files). **Hoitovuorot** is now updated by the Raspberry Pi running `fetch-evaka.py` (commits encrypted `hoitovuorot.enc.json` and calls the publish webhook).
 - **Grok Bot Automation Impact**:
   - **None** to data schema or fetchers. Publish scripts already preserve non-generated repo files. No secrets are stored in this log.
 
