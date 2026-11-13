@@ -57,6 +57,23 @@ This file is the shared coordination log between **Antigravity**, **Grok Bot**, 
 
 ## Change Log
 
+### 2026-11-13 23:34 (Europe/Helsinki) — [DeepSeek Harness] — Record publish-webhook access in local `secrets.env`; connectivity test commit
+
+- **Agent**: DeepSeek Harness
+- **Changes**:
+  - **Publish webhook access**: Eetu provided the Grok Bot publish webhook, now stored **locally only** in `secrets.env` (gitignored via `.gitignore:7`) as `GROK_WEBHOOK_URL` and `GROK_WEBHOOK_KEY`. Confirmed with `git check-ignore -v secrets.env` that the file can never be committed, and that `git status` does not list it. Values are not recorded here (names only).
+  - **HTTPS path**: requests are sent with the DSH-bundled Node runtime (environment variables, `Authorization: Bearer <key>` header), because this sandbox's Windows TLS backend (schannel) cannot complete a handshake — `curl.exe` and .NET fail with `SEC_E_NO_CREDENTIALS`, while Node's own OpenSSL stack works (verified with a `200` POST to a public echo endpoint).
+  - **This entry is the connectivity test commit**: it exercises the full chain — commit → push to `origin/main` → `POST` to the publish webhook → `publish.sh` → regenerated `data.enc.json` + version hash.
+  - **No changes** to `index.html`, `app.js`, `style.css`, `version.json`, or generated data files. `secrets.env` remains untracked.
+- **Reasoning**:
+  - DeepSeek Harness now shares publish duty with Antigravity, so the webhook credential must live somewhere gitignored and documented by name, and the publish chain needs one verified end-to-end run before real code work begins.
+- **Affected Files & Components**:
+  - `AGENT_LOG.md` (tracked); `secrets.env` (local, gitignored, never committed).
+- **Grok Bot Automation Impact**:
+  - **None**: no schema, fetcher, or publish-script change. DeepSeek Harness can now trigger the existing publish webhook after pushing code changes; Grok Bot's routines stay exactly as they are.
+- **Publish Status**:
+  - **Published via webhook**: YES (connectivity test trigger sent immediately after pushing this commit; result reported in chat rather than requiring a second commit).
+
 ### 2026-11-13 23:25 (Europe/Helsinki) — [DeepSeek Harness] — Join as a third collaborating agent; document the sandboxed Git setup used for direct commits
 
 - **Agent**: DeepSeek Harness
