@@ -394,18 +394,20 @@ Secrets are stored on the Pi in `/home/pi/perhekalenteri/secrets.env` with restr
 | `SMTP_PASSWORD` | Gandi mailbox password (read from `/home/pi/smtp_pw` or `secrets.env`). |
 | `ALERT_EMAIL` | Recipient address for failure alerts (`eetu.e.rantanen@gmail.com`). |
 
-**Observed state, verified on the live Pi 2026-11-14 via SSH**: `secrets.env` currently contains only
+**Observed state, verified on the live Pi 2026-11-14 via SSH**: `secrets.env` contains
 `FAMILY_PLANNER_PASSWORD`, `GITHUB_TOKEN`, `GITHUB_USER`, `GIT_REMOTE`, `EVAKA_USERNAME`, `EVAKA_PASSWORD`,
-`KEEP_EMAIL` and `KEEP_MASTER_TOKEN`. There are **no `GROK_WEBHOOK_*` and no `SMTP_*` entries**, so:
+`KEEP_EMAIL`, `KEEP_MASTER_TOKEN`, **`GROK_WEBHOOK_URL`** and **`GROK_WEBHOOK_KEY`** (mode `600`, backup at
+`/home/pi/secrets.env.bak`). Notes:
 
-- The SMTP settings in the table above come from defaults inside `run_evaka_cron.py`, with the password read
-  from `/home/pi/smtp_pw`; alerting works without those variables being present in `secrets.env`.
-- `webhook_url` is empty for all three fetchers. When a job detects a change it still encrypts, commits and
-  pushes, then prints `… GROK_WEBHOOK_URL puuttuu secrets.env-tiedostosta` and **skips the webhook**. The new
-  data therefore goes live on the publisher's next scheduled 30-minute run (06:00–22:00) rather than
-  immediately, and a change made after 22:00 waits until the next morning.
-- Adding `GROK_WEBHOOK_URL` and `GROK_WEBHOOK_KEY` to the Pi's `secrets.env` (the same values the local
-  clone holds) restores immediate publishing. This does not affect correctness of the data, only latency.
+- **The webhook was missing until 2026-11-14** and has since been added, so the Pi now triggers the publisher
+  immediately instead of waiting for the next scheduled run. Verified end-to-end with
+  `python3 fetch-evaka.py --force-webhook`: `Webhook lähetetty (HTTP 200)`, and the publish commit appeared on
+  `origin/main` about 25 seconds later. If it ever regresses, that message becomes
+  `… GROK_WEBHOOK_URL puuttuu secrets.env-tiedostosta` and the data only goes live on the next 30-minute run
+  (06:00–22:00) — latency, not correctness.
+- **SMTP is not configured in `secrets.env`** and does not need to be: `run_evaka_cron.py` carries the
+  `mail.gandi.net` defaults and reads the password from `/home/pi/smtp_pw`, so failure alerting works as-is.
+- The Pi also keeps the eVaka password in `/home/pi/evaka_pw`, outside the repository.
 
 ---
 
@@ -423,6 +425,10 @@ Secrets are stored on the Pi in `/home/pi/perhekalenteri/secrets.env` with restr
    author, and state the publish status. Routine data-only publishes are not logged.
 7. **Dark mode and night colours** come from `body.night`; new components must define colours in both
    palettes, using the `--*` custom properties rather than hard-coded values.
+8. **`.gitignore` is publisher-owned** — it is regenerated from the publisher's own heredoc on every
+   publish, so additions made in this repository are wiped within 30 minutes. Verified: a `calendarpw.txt`
+   rule added here disappeared in publish commit `b75e62c`. Durable ignore rules must be requested on the
+   publisher side (`publish.sh`); this repository only keeps the entries that heredoc already emits.
 
 ---
 

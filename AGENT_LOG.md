@@ -57,6 +57,25 @@ This file is the shared coordination log between **Antigravity**, **Grok Bot**, 
 
 ## Change Log
 
+### 2026-11-14 00:20 (Europe/Helsinki) — [DeepSeek Harness] — Pi gains webhook credentials; end-to-end publish verified; `.gitignore` found to be publisher-owned
+
+- **Agent**: DeepSeek Harness
+- **Changes**:
+  - **Added `GROK_WEBHOOK_URL` and `GROK_WEBHOOK_KEY`** to `/home/pi/perhekalenteri/secrets.env` over SSH (values read from the local clone, never echoed, never placed in a command line). The file stays `chmod 600`; a pre-change copy is kept at `/home/pi/secrets.env.bak` (outside the repository so it can never be committed).
+  - **Verified end-to-end** with `python3 fetch-evaka.py --force-webhook` on the Pi: `Webhook lähetetty (HTTP 200): {"success":true,"runUuid":"9647a04f-…"}`, and publish commit **`b75e62c` (`Päivitys 2026-11-14 00:11`)** appeared on `origin/main` ~25 seconds later. Pi-originated changes now publish immediately instead of waiting for the next 30-minute cycle.
+  - **Discovered and documented a pipeline hazard**: publish commit `b75e62c` **rewrote `.gitignore`**, removing the two comment lines and the `calendarpw.txt` rule added earlier today (`.gitignore | 3 ---`). The publisher regenerates that file from its own heredoc on every run, so **any ignore rule added in this repository is ephemeral** and durable entries must be requested on the publisher side. Added as rule 8 in [`ARCHITECTURE.md`](ARCHITECTURE.md) §8, and corrected the §7.6 "observed state" note to match the Pi as it is now (webhook configured, SMTP still from wrapper defaults).
+  - **Operational note**: when piped through `ssh … bash -s`, the *last* line of a PowerShell here-string picks up a stray `\r`; end piped scripts with a harmless `echo done` so no path-bearing argument carries it. (This bit me once: `ls -l /home/pi/secrets.env.bak` reported "no such file" while the file was actually there.)
+  - `calendarpw.txt` itself no longer exists — its ignore rule is therefore gone without immediate consequence, but see the publisher-side recommendation below.
+  - **No changes** to any code file or generated data file.
+- **Reasoning**:
+  - The webhook gap meant a change detected on the Pi stayed invisible for up to 30 minutes, or overnight after 22:00. Proving the fix with a forced run was the only way to know it works, and that run incidentally exposed the `.gitignore` rewrite — a silent trap for anyone who adds an ignore rule here and assumes it sticks.
+- **Affected Files & Components**:
+  - `ARCHITECTURE.md` (§7.6, §8); `AGENT_LOG.md`; remote `/home/pi/perhekalenteri/secrets.env` and `/home/pi/secrets.env.bak`.
+- **Grok Bot Automation Impact**:
+  - **Action for the publisher**: add `calendarpw.txt` (or a general `*pw*` / `secrets*` pattern) to `publish.sh`'s `.gitignore` heredoc so the exclusions survive. Everything else is unchanged; no schema or fetcher change.
+- **Publish Status**:
+  - **Published via webhook**: NO for this docs commit (it changes no stamped file). The Pi's forced run did trigger a publish, which produced `b75e62c` and refreshed `data.enc.json` — `version.json` stayed `aa5d0ab364`, as expected for a data-only publish.
+
 ### 2026-11-14 00:08 (Europe/Helsinki) — [DeepSeek Harness] — SSH access to the Raspberry Pi established; first health check and two documentation corrections
 
 - **Agent**: DeepSeek Harness
