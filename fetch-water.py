@@ -616,11 +616,13 @@ def write_json(path, payload):
 
 
 def catch_up(client, model, point, connection, today, last_run_day):
-    """Fill data that became available since the last successful run.
+    """Fill daily months that became available since the last successful run.
 
-    Regular runs only refresh the current/previous month and the last two days.
-    The first run of the day (the morning one, because nights are idle) also
-    walks any days and months missed in between, so an outage heals itself.
+    Hourly detail is deliberately **not** backfilled: it is collected from the
+    day the collector starts (yesterday + today on every run), because the
+    family calendar only needs consumption from now on. Daily history is cheap
+    and drives the dashboard's long-range chart, so gaps there heal on the
+    first run of a day.
     """
     if last_run_day is None or last_run_day >= today:
         return
@@ -638,26 +640,6 @@ def catch_up(client, model, point, connection, today, last_run_day):
             count = upsert_daily(connection, payload)
             log(f"  {begin:%Y-%m}: {count} days")
             time.sleep(0.3)
-
-    # Hourly rows: the last couple of weeks at most; older hours have no value.
-    try:
-        cap = max(1, int(first("VESI_CATCHUP_DAYS", default="14")))
-    except ValueError:
-        cap = 14
-    start = last_run_day + timedelta(days=1)
-    end = today - timedelta(days=2)
-    earliest = (today - timedelta(days=1)) - timedelta(days=cap)
-    if start < earliest:
-        start = earliest
-    if start <= end:
-        log(f"catch-up: hourly readings for {start} .. {end}")
-        day = start
-        while day <= end:
-            payload = fetch_day(client, model, point, day)
-            count = replace_hourly_day(connection, day, payload)
-            log(f"  {day}: {count} hourly")
-            time.sleep(0.3)
-            day += timedelta(days=1)
 
 
 def sync(client, connection, args):
@@ -725,6 +707,10 @@ def sync(client, connection, args):
         if payload.get("infoCodes"):
             info = payload["infoCodes"]
         log(f"{day}: {count} hourly readings")
+
+    if not meta_get(connection, "hourly_since"):
+        meta_set(connection, "hourly_since", (today - timedelta(days=1)).isoformat())
+        log(f"hourly collection starts at {today - timedelta(days=1)}")
 
     if first_run_today:
         log("first run today: refreshing the previous night and filling any gaps")
@@ -847,6 +833,7 @@ def print_stats(connection):
         "last_volume",
         "last_volume_at",
         "last_run_day",
+        "hourly_since",
         "last_sync",
         "backfill_done",
     ):

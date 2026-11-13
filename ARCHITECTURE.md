@@ -385,8 +385,8 @@ Cron on the Pi does not execute `fetch-*.py` directly. Instead, all scheduled ta
 > launcher sleeps a random 7–21 minutes and only then runs the collector, so the outbound requests land on
 > different minutes and never look mechanical. Night (23–07) is idle: the meter's daily reading closes at
 > 23:59, so the first morning run picks up the complete previous day and anything else that arrived
-> overnight. If the Pi was off longer, the same run backfills the missing months and up to 14 days of
-> hourly detail (`VESI_CATCHUP_DAYS`).
+> overnight. If the Pi was off longer, the same run backfills the missing **daily** months; hourly detail is
+> forward-only and is never backfilled.
 
 > **Also present in the same crontab**: an unrelated `cozify-logger` job runs every 10 minutes
 > (`*/10 * * * * /home/pi/cozify-logger/venv/bin/python …/logger.py`). It does not belong to this project —
@@ -462,14 +462,17 @@ without exposing them in argv, shell history or the repository.
   reading in m³ and `infoCodes.timestampStringFin` its time. `infoCodes.infoCodesList` carries the portal's
   `DRY` / `REVERSE` / `LEAK` / `BURST` flags, exported as `alerts`.
 - History is about two years (first data 2024-11-14, account created 2023-06). The first run backfills the
-  last 730 days month by month; later runs refresh the current and previous month plus the last two days of
-  hourly data.
+  last 730 days of **daily** totals month by month; later runs refresh the current and previous month plus
+  the last two days of hourly data. Hourly collection is **forward-only**: it starts at the day the
+  collector is installed (`hourly_since` in `meta`), and older hours are never backfilled because the
+  family calendar only needs consumption from now on.
 
 **Storage.** `water.db` on the Pi (WAL) with `daily(day PRIMARY KEY, liters)`, `hourly(ts PRIMARY KEY, day,
 local, liters)` and a small `meta` table. The hourly rows for a day are replaced as a unit, because the
 meter's timestamps drift slightly between reports (05:58 vs 06:00); daily rows are upserted by date. The
 database, its `-wal`/`-shm` files and `water.json` are excluded through `.git/info/exclude`, because
-`.gitignore` is publisher-owned (§8 rule 8).
+`.gitignore` is publisher-owned (§8 rule 8). `meta.hourly_since` marks the first day hourly data was
+collected; nothing earlier is fetched.
 
 **Output.** `/var/www/html/water.json`, written atomically and served next to `data.json`. It contains the
 meter reading, active alerts, today/yesterday, week/month/year totals, the last 30 days and the last 24
@@ -483,13 +486,14 @@ still pending — displays a notice that new readings appear in the morning.
 minutes, then runs `run_evaka_cron.py --job water --json /var/www/html/water.json`, so it inherits the
 3-consecutive-failure email alert. The launcher is what makes the fetch look non-mechanical; the cron log
 records the chosen delay. The **first run of each day** (the morning one, since nights are idle) also
-catches up: it refills whole months older than the previous month and hourly days missed since the last
-successful run (last 14 days at most, `VESI_CATCHUP_DAYS`). Manual commands: `--login-test`, `--probe`,
-`--backfill`, `--verify`, `--show-config`.
+catches up on any missing **daily** months; hourly rows are only ever collected from `hourly_since`
+onward. Manual commands: `--login-test`, `--probe`, `--backfill`, `--verify`, `--show-config`.
 
-**Family calendar (future).** The `daily` table is the interface: an adapter can emit `water.enc.json` with
-the same AES-GCM envelope and let `collect.py`/`publish.sh` include it in `data.enc.json`. This is not
-enabled yet because it needs a publisher-side change (Grok Bot); until then the calendar is untouched.
+**Family calendar (future).** The `hourly` table is the interface for consumption: an adapter can emit
+`water.enc.json` with per-hour `{ts, liters}` (plus daily totals if wanted) using the same AES-GCM envelope,
+and `collect.py`/`publish.sh` would include it in `data.enc.json`. Hourly rows exist from `hourly_since`
+onward, which is enough for a calendar showing current/recent consumption. This is not enabled yet because
+it needs a publisher-side change (Grok Bot); until then the calendar is untouched.
 
 > **Terms-of-service note:** Vesiportaali's terms prohibit automatic copying of site information to other
 > systems without permission. This is a personal-use automation of the owner's own meter, but the clean
@@ -556,6 +560,7 @@ is not enough to see real data:
   `AGENT_LOG.md` discipline.
 - **Data staleness is visible but silent.** The footer warns after 3 hours; there is no alerting inside
   the page beyond that.
-- **Water has no calendar adapter yet.** `fetch-water.py` already keeps the daily/hourly history a
-  `water.enc.json` feed would need; wiring it into `data.enc.json` requires a `collect.py`/`publish.sh`
-  change on the publisher side (Grok Bot), so the calendar is untouched for now.
+- **Water has no calendar adapter yet.** `fetch-water.py` already keeps the hourly history a
+  `water.enc.json` feed would need (forward from the installation date; historical hours are not
+  backfilled). Wiring it into `data.enc.json` requires a `collect.py`/`publish.sh` change on the publisher
+  side (Grok Bot), so the calendar is untouched for now.

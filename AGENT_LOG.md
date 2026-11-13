@@ -57,6 +57,35 @@ This file is the shared coordination log between **Antigravity**, **Grok Bot**, 
 
 ## Change Log
 
+### 2026-11-14 01:00 (Europe/Helsinki) — [DeepSeek Harness] — Hourly water data is forward-only; historical hours are not backfilled
+
+- **Agent**: DeepSeek Harness
+- **Changes**:
+  - **Clarified scope**: the water data the family calendar needs is the **hourly** series, and it only needs
+    to start from now. `fetch-water.py` still collects yesterday + today on every run (which covers the
+    previous night and the last 24 hours), but the morning catch-up now refills **daily months only** — the
+    hourly catch-up (`VESI_CATCHUP_DAYS`, up to 14 days) has been removed.
+  - Added `meta.hourly_since` to `water.db`: set on the first hourly collection to the earliest day that was
+    intentionally fetched (currently `2026-11-13`, the last complete day). `--verify` prints it. Nothing
+    earlier is fetched or kept.
+  - Pruned the hourly rows created by the earlier catch-up tests (`2026-10-30 … 2026-11-12`) on the Pi;
+    the table now begins at `2026-11-13`.
+  - `ARCHITECTURE.md` §7.5/§7.7 now state that daily months are catch-up-able but hourly is forward-only,
+    and that the calendar adapter should consume the `hourly` table.
+  - **Supersedes** the hourly part of the 00:55 entry: `VESI_CATCHUP_DAYS` is no longer read by any code.
+- **Reasoning**:
+  - The portal has two years of hourly history, but the calendar only needs consumption from today onward.
+    Backfilling hours would cost requests and storage for data the application will never show.
+  - Keeping yesterday's hourly set gives the last-24-hours context on day one and preserves the previous
+    night's detail when the morning run completes it.
+- **Affected Files & Components**:
+  - `fetch-water.py`, `ARCHITECTURE.md`, `AGENT_LOG.md`; Pi: `water.db` (`hourly_since`, pruned hourly rows).
+- **Grok Bot Automation Impact**:
+  - **None now.** When the calendar is wired, `water.enc.json` should carry the hourly series
+    (`{ts, liters}`); daily totals remain available if a summary is wanted.
+- **Publish Status**:
+  - **Published via webhook**: NO — no stamped frontend file changed.
+
 ### 2026-11-14 00:55 (Europe/Helsinki) — [DeepSeek Harness] — Water job becomes daytime-only with random minutes, morning catch-up, and a night-aware dashboard
 
 - **Agent**: DeepSeek Harness
