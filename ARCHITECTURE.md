@@ -465,7 +465,8 @@ without exposing them in argv, shell history or the repository.
   last 730 days of **daily** totals month by month; later runs refresh the current and previous month plus
   the last two days of hourly data. Hourly collection is **forward-only**: it starts at the day the
   collector is installed (`hourly_since` in `meta`), and older hours are never backfilled because the
-  family calendar only needs consumption from now on.
+  family calendar only needs consumption from now on. The first run of each day fetches the **two previous
+  days plus today**, so the dashboard always has two complete days to draw.
 
 **Storage.** `water.db` on the Pi (WAL) with `daily(day PRIMARY KEY, liters)`, `hourly(ts PRIMARY KEY, day,
 local, liters)` and a small `meta` table. The hourly rows for a day are replaced as a unit, because the
@@ -475,18 +476,20 @@ database, its `-wal`/`-shm` files and `water.json` are excluded through `.git/in
 collected; nothing earlier is fetched.
 
 **Output.** `/var/www/html/water.json`, written atomically and served next to `data.json`. It contains the
-meter reading, active alerts, today/yesterday, week/month/year totals, the last 30 days and the last 24
-hourly readings. The cozify dashboard (`/var/www/html/index.html`, Pi-only, backup
-`index.html.bak-20261114`) fetches it and renders a **Vedenkulutus** card with a 14-day bar chart and a
-summary pill. The card derives the latest available day from `daily[]` (so it stays correct across
-midnight), shows `Ei vielä vesidataa` when there are no rows, and during 23–07 — or while the morning run is
-still pending — displays a notice that new readings appear in the morning.
+meter reading, active alerts, today/yesterday, week/month/year totals, the last 30 daily totals and up to
+720 hourly readings (30 days). The cozify dashboard (`/var/www/html/index.html`, Pi-only, backup
+`index.html.bak-20261114`) fetches it and renders a **Vedenkulutus** card whose chart shows hourly
+consumption (litres/hour) filtered by the dashboard's range selector — the default 48 h is exactly the two
+previous days — plus a summary pill. The card derives the latest available day from `daily[]` (so it stays
+correct across midnight), shows `Ei vielä vesidataa` when there are no rows, and during 23–07 — or while
+the morning run is still pending — displays a notice that new readings appear in the morning.
 
 **Schedule.** `tools/run-water-cron.sh` is called at the top of each hour 07–23, sleeps a random 7–21
 minutes, then runs `run_evaka_cron.py --job water --json /var/www/html/water.json`, so it inherits the
 3-consecutive-failure email alert. The launcher is what makes the fetch look non-mechanical; the cron log
 records the chosen delay. The **first run of each day** (the morning one, since nights are idle) also
-catches up on any missing **daily** months; hourly rows are only ever collected from `hourly_since`
+catches up on any missing **daily** months and fetches the **two previous days plus today** for the hourly
+series; later runs refresh yesterday + today. Hourly rows are only ever collected from `hourly_since`
 onward. Manual commands: `--login-test`, `--probe`, `--backfill`, `--verify`, `--show-config`.
 
 **Family calendar (future).** The `hourly` table is the interface for consumption: an adapter can emit

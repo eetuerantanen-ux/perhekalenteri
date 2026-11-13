@@ -57,6 +57,32 @@ This file is the shared coordination log between **Antigravity**, **Grok Bot**, 
 
 ## Change Log
 
+### 2026-11-14 01:05 (Europe/Helsinki) — [DeepSeek Harness] — Two previous days of hourly water, hourly dashboard graph
+
+- **Agent**: DeepSeek Harness
+- **Changes**:
+  - **Collector**: the first run of each day now fetches **two previous days plus today** (`D-2`, `D-1`,
+    `D0`) for the hourly series; later runs refresh `D-1` + `D0`. `hourly_since` moves back to the earliest
+    day actually fetched (`2026-11-12` on this install). Still forward-only: nothing before that is fetched.
+  - **Export**: `water.json` now carries up to **720 hourly rows (30 days)** instead of the last 24, so the
+    dashboard can filter by its range selector.
+  - **Dashboard**: the Vedenkulutus chart is now **hourly consumption (L/h)** filtered by the dashboard's
+    range buttons (6 h / 24 h / 48 h / 7 vrk / 30 vrk), default 48 h — i.e. the two previous days — with a
+    caption and an `Ei vielä tuntidataa valitulla aikavälillä` fallback. The 14-day daily bar chart is gone;
+    the week/month/year tiles stay.
+  - **Docs**: `ARCHITECTURE.md` §7.7 (hourly window, export size, chart behaviour).
+- **Reasoning**:
+  - The calendar needs hourly consumption, and the Pi dashboard should show the same series next to the
+    other hourly charts. Two previous days are the minimum for a meaningful 48 h profile; fetching `D-2`
+    once per day keeps that window complete without re-requesting static history.
+- **Affected Files & Components**:
+  - `fetch-water.py`, `ARCHITECTURE.md`, `AGENT_LOG.md`; Pi: `water.db` (`hourly_since`, D-2 rows),
+    `/var/www/html/water.json`, `/var/www/html/index.html` (Pi-only).
+- **Grok Bot Automation Impact**:
+  - **None now.** When wiring `water.enc.json`, include at least the two previous days of hourly rows.
+- **Publish Status**:
+  - **Published via webhook**: NO — no stamped frontend file changed. The dashboard edit is Pi-only.
+
 ### 2026-11-14 01:00 (Europe/Helsinki) — [DeepSeek Harness] — Hourly water data is forward-only; historical hours are not backfilled
 
 - **Agent**: DeepSeek Harness

@@ -549,7 +549,7 @@ def build_export(connection, point, info, days=30):
     daily_rows.reverse()
 
     hourly_rows = connection.execute(
-        "SELECT ts, local, liters FROM hourly ORDER BY ts DESC LIMIT 24"
+        "SELECT ts, local, liters FROM hourly ORDER BY ts DESC LIMIT 720"
     ).fetchall()
     hourly_rows.reverse()
 
@@ -701,16 +701,25 @@ def sync(client, connection, args):
             log(f"{previous_month:%Y-%m}: {count} days")
 
     info = None
-    for day in (today - timedelta(days=1), today):
+    if first_run_today:
+        # Two previous days plus today, so the dashboard's hourly graph starts
+        # with two complete days and can still show a rolling window.
+        hourly_days = [today - timedelta(days=2), today - timedelta(days=1), today]
+    else:
+        hourly_days = [today - timedelta(days=1), today]
+
+    for day in hourly_days:
         payload = fetch_day(client, model, point, day)
         count = replace_hourly_day(connection, day, payload)
         if payload.get("infoCodes"):
             info = payload["infoCodes"]
         log(f"{day}: {count} hourly readings")
 
-    if not meta_get(connection, "hourly_since"):
-        meta_set(connection, "hourly_since", (today - timedelta(days=1)).isoformat())
-        log(f"hourly collection starts at {today - timedelta(days=1)}")
+    earliest_hour = min(hourly_days)
+    since = meta_get(connection, "hourly_since")
+    if not since or earliest_hour.isoformat() < since:
+        meta_set(connection, "hourly_since", earliest_hour.isoformat())
+        log(f"hourly collection starts at {earliest_hour}")
 
     if first_run_today:
         log("first run today: refreshing the previous night and filling any gaps")
