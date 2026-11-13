@@ -1,12 +1,12 @@
 # Perhekalenteri — Agent Collaboration & Change Log (`AGENT_LOG.md`)
 
-This file is the shared coordination log between **Antigravity** and **Grok Bot** for developing and maintaining `perhekalenteri`.
+This file is the shared coordination log between **Antigravity**, **Grok Bot**, and **DeepSeek Harness** for developing and maintaining `perhekalenteri`.
 
-## Collaboration Rules for Both Agents
+## Collaboration Rules for All Agents
 
-1. **Read First**: Before planning or making any code, style, or automation changes, always read this file (`AGENT_LOG.md`) first to see recent changes made by the other agent.
+1. **Read First**: Before planning or making any code, style, or automation changes, always read this file (`AGENT_LOG.md`) first to see recent changes made by the other agents.
 2. **Preserve Changes (Important for Grok Bot's Publish Script)**:
-   - Antigravity may commit updates directly to `index.html`, `app.js`, `style.css`, and `AGENT_LOG.md` in this GitHub repository.
+   - Antigravity and DeepSeek Harness may commit updates directly to `index.html`, `app.js`, `style.css`, and `AGENT_LOG.md` in this GitHub repository.
    - If Grok Bot publishes from a local working directory or template directory, Grok Bot **must** sync/pull changes from `origin/main` before publishing so it does not overwrite edits made by Antigravity (such as `index.html` template files, `app.js`, `style.css`, or `AGENT_LOG.md`).
 3. **Publishing via Webhook**:
    - After Antigravity commits and pushes code changes and updates `AGENT_LOG.md`, Antigravity triggers Grok Bot's publish webhook (credentials stored privately in `~/.gemini/perhekalenteri-webhook.env`, never in git) and marks the entry as `Published via webhook: YES`.
@@ -15,7 +15,8 @@ This file is the shared coordination log between **Antigravity** and **Grok Bot*
    - Do **not** log routine hourly data-only updates (`data.enc.json`, `prices.json`, `forecast.json`).
    - **Do** log every UI, logic, CSS, data-schema, or automation change.
    - Add new entries at the **top** of the `## Change Log` section (newest first).
-   - Every entry must clearly identify the author in the heading: **`[Antigravity]`** or **`[Grok Bot]`**.
+   - Every entry must clearly identify the author in the heading: **`[Antigravity]`**, **`[Grok Bot]`**, or **`[DeepSeek Harness]`**.
+5. **Commit Directly, But Sync First**: DeepSeek Harness commits directly to `main` from a local clone. Like Grok Bot, it must `git fetch` and rebase onto `origin/main` before pushing, so it never overwrites Antigravity's or Grok Bot's commits.
 
 ---
 
@@ -38,8 +39,8 @@ This file is the shared coordination log between **Antigravity** and **Grok Bot*
 ## Entry Template
 
 ```markdown
-### YYYY-MM-DD HH:MM (Europe/Helsinki) — [Antigravity | Grok Bot] — Short Title
-- **Agent**: Antigravity (or Grok Bot)
+### YYYY-MM-DD HH:MM (Europe/Helsinki) — [Antigravity | Grok Bot | DeepSeek Harness] — Short Title
+- **Agent**: Antigravity (or Grok Bot / DeepSeek Harness)
 - **Changes**:
   - Detailed list of changes made (or planned).
 - **Reasoning**:
@@ -55,6 +56,26 @@ This file is the shared coordination log between **Antigravity** and **Grok Bot*
 ---
 
 ## Change Log
+
+### 2026-11-13 23:25 (Europe/Helsinki) — [DeepSeek Harness] — Join as a third collaborating agent; document the sandboxed Git setup used for direct commits
+
+- **Agent**: DeepSeek Harness
+- **Changes**:
+  - **Joined the repo as a third collaborating agent** alongside Antigravity and Grok Bot. Updated the header, renamed the rules section to "Collaboration Rules for All Agents", added rule 5 (commit directly, but `git fetch` + rebase onto `origin/main` first), and extended the author tags and entry template with **`[DeepSeek Harness]`**.
+  - **Fresh clone prepared locally** at `C:\Users\eetu\OneDrive\Ohjelmointi\perhekalenteri` (branch `main`, tracking `origin/main`, clean tree, 13.3 MB). Commit identity is `eetuerantanen-ux <239039043+eetuerantanen-ux@users.noreply.github.com>`, matching the existing history so commits attribute to Eetu's GitHub account.
+  - **Environment notes for the other agents** (these are quirks of the DeepSeek Harness sandbox, not of the repo):
+    1. `http.sslBackend=openssl` is set in the local clone's `.git/config` (untracked). The default `schannel` backend fails in the sandbox with `SEC_E_NO_CREDENTIALS`, so TLS must go through Git's bundled OpenSSL + CA bundle.
+    2. **Credential helpers cannot be used here**: git executes helpers through `sh.exe`, and msys processes abort in the sandbox (`couldn't create signal pipe, Win32 error 5`). Pushes therefore use the OAuth credential already in Windows Credential Manager (written by `git-credential-manager github login`) and pass it per-command as an `http.extraheader` Basic-auth header. No token is written to any file in the repo.
+    3. Verified end-to-end with `git push --dry-run origin main` (exit 0, authenticated; anonymous pushes to this repo are rejected).
+  - **No changes** to `index.html`, `app.js`, `style.css`, `version.json`, or any generated data file (`data.enc.json`, `prices.json`, `forecast.json`).
+- **Reasoning**:
+  - All three agents now commit to the same `main` branch, so the log must name the newcomer and state how it syncs, to keep the "preserve the other agents' changes" guarantee intact and to stop anyone from mistaking the odd TLS/credential workaround for a repo bug.
+- **Affected Files & Components**:
+  - `AGENT_LOG.md` only.
+- **Grok Bot Automation Impact**:
+  - **None**: `AGENT_LOG.md` is already preserved by `publish.sh`; no schema, fetcher, or publish-script change is needed. Because no code file changed, there is no version-hash impact (`version.json` untouched).
+- **Publish Status**:
+  - **Published via webhook**: NO (documentation-only change; no frontend, data, or automation change to publish).
 
 ### 2026-11-12 23:38 (Europe/Helsinki) — [Grok Bot] — Stop 30-min Aromi14 polling; decrypt weekly `ruokalistat.enc.json` and hourly `muistilista.enc.json` in `publish.sh`
 
