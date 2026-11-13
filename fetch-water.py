@@ -837,7 +837,7 @@ def print_stats(connection):
         "SELECT COUNT(*), MIN(day), MAX(day) FROM daily"
     ).fetchone()
     hourly = connection.execute(
-        "SELECT COUNT(*), MIN(local), MAX(local) FROM hourly"
+        "SELECT COUNT(*), MIN(day), MAX(day) FROM hourly"
     ).fetchone()
     print(f"daily:  {daily[0]} rows, {daily[1]} .. {daily[2]}")
     print(f"hourly: {hourly[0]} rows, {hourly[1]} .. {hourly[2]}")
