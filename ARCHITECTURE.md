@@ -30,6 +30,7 @@ framework, no `package.json`, no bundler and no CI.
 | `ruokalistat.enc.json` | — | Daycare menus, written by the Pi (`fetch-menus.py`) |
 | `fetch-evaka.py`, `fetch-keep.py`, `fetch-menus.py` | 721 / 832 / 684 | Pi-side fetchers (Python 3; evaka & menus stdlib+ctypes, keep uses gkeepapi in .venv) |
 | `fetch-water.py` | ~840 | Pi-side Vesiportaali (Kouvolan Vesi) water collector; stdlib only, SQLite history, JSON export |
+| `tools/run-water-cron.sh` | — | Cron launcher: sleeps a random 7–21 min, then runs the water job (daytime only) |
 | `tools/provision-vesi.ps1` | — | Windows helper: stores the `VESI_*` credentials in the Pi's `secrets.env` over SSH |
 | `AGENT_LOG.md` | — | Collaboration rules + change log |
 | `.nojekyll`, `robots.txt` | — | Serve files verbatim; keep the page out of search engines |
@@ -376,9 +377,16 @@ Cron on the Pi does not execute `fetch-*.py` directly. Instead, all scheduled ta
 # Aromi14 daycare menus (once a week on Tuesdays at 14:00)
 0 14 * * 2 /usr/bin/python3 /home/pi/perhekalenteri/run_evaka_cron.py --job menus
 
-# Vesiportaali water consumption (hourly at :07)
-7 * * * * /usr/bin/python3 /home/pi/perhekalenteri/run_evaka_cron.py --job water --json /var/www/html/water.json
+# Vesiportaali water consumption (daytime 07-23, random minute :07-:21)
+0 7-23 * * * /bin/bash /home/pi/perhekalenteri/tools/run-water-cron.sh
 ```
+
+> **Water is deliberately daytime-only.** Cron starts the launcher at the top of each hour 07–23; the
+> launcher sleeps a random 7–21 minutes and only then runs the collector, so the outbound requests land on
+> different minutes and never look mechanical. Night (23–07) is idle: the meter's daily reading closes at
+> 23:59, so the first morning run picks up the complete previous day and anything else that arrived
+> overnight. If the Pi was off longer, the same run backfills the missing months and up to 14 days of
+> hourly detail (`VESI_CATCHUP_DAYS`).
 
 > **Also present in the same crontab**: an unrelated `cozify-logger` job runs every 10 minutes
 > (`*/10 * * * * /home/pi/cozify-logger/venv/bin/python …/logger.py`). It does not belong to this project —
@@ -467,11 +475,17 @@ database, its `-wal`/`-shm` files and `water.json` are excluded through `.git/in
 meter reading, active alerts, today/yesterday, week/month/year totals, the last 30 days and the last 24
 hourly readings. The cozify dashboard (`/var/www/html/index.html`, Pi-only, backup
 `index.html.bak-20261114`) fetches it and renders a **Vedenkulutus** card with a 14-day bar chart and a
-summary pill.
+summary pill. The card derives the latest available day from `daily[]` (so it stays correct across
+midnight), shows `Ei vielä vesidataa` when there are no rows, and during 23–07 — or while the morning run is
+still pending — displays a notice that new readings appear in the morning.
 
-**Schedule.** Hourly at `:07` through `run_evaka_cron.py --job water --json /var/www/html/water.json`, so
-it inherits the 3-consecutive-failure email alert. Manual commands: `--login-test`, `--probe`, `--backfill`,
-`--verify`, `--show-config`.
+**Schedule.** `tools/run-water-cron.sh` is called at the top of each hour 07–23, sleeps a random 7–21
+minutes, then runs `run_evaka_cron.py --job water --json /var/www/html/water.json`, so it inherits the
+3-consecutive-failure email alert. The launcher is what makes the fetch look non-mechanical; the cron log
+records the chosen delay. The **first run of each day** (the morning one, since nights are idle) also
+catches up: it refills whole months older than the previous month and hourly days missed since the last
+successful run (last 14 days at most, `VESI_CATCHUP_DAYS`). Manual commands: `--login-test`, `--probe`,
+`--backfill`, `--verify`, `--show-config`.
 
 **Family calendar (future).** The `daily` table is the interface: an adapter can emit `water.enc.json` with
 the same AES-GCM envelope and let `collect.py`/`publish.sh` include it in `data.enc.json`. This is not

@@ -615,6 +615,51 @@ def write_json(path, payload):
     log(f"wrote {target} ({len(payload['daily'])} days, {len(payload['hourly'])} hourly)")
 
 
+def catch_up(client, model, point, connection, today, last_run_day):
+    """Fill data that became available since the last successful run.
+
+    Regular runs only refresh the current/previous month and the last two days.
+    The first run of the day (the morning one, because nights are idle) also
+    walks any days and months missed in between, so an outage heals itself.
+    """
+    if last_run_day is None or last_run_day >= today:
+        return
+
+    # Daily rows: whole months older than the previous month, which the normal
+    # run already refreshes.
+    previous_month = month_start(month_start(today) - timedelta(days=1))
+    earliest_month = month_start(today - timedelta(days=730))
+    from_month = max(month_start(last_run_day), earliest_month)
+    if from_month < previous_month:
+        months = list(month_starts(from_month, previous_month - timedelta(days=1)))
+        log(f"catch-up: {len(months)} month(s) of daily data")
+        for begin in months:
+            payload = fetch_month(client, model, point, begin)
+            count = upsert_daily(connection, payload)
+            log(f"  {begin:%Y-%m}: {count} days")
+            time.sleep(0.3)
+
+    # Hourly rows: the last couple of weeks at most; older hours have no value.
+    try:
+        cap = max(1, int(first("VESI_CATCHUP_DAYS", default="14")))
+    except ValueError:
+        cap = 14
+    start = last_run_day + timedelta(days=1)
+    end = today - timedelta(days=2)
+    earliest = (today - timedelta(days=1)) - timedelta(days=cap)
+    if start < earliest:
+        start = earliest
+    if start <= end:
+        log(f"catch-up: hourly readings for {start} .. {end}")
+        day = start
+        while day <= end:
+            payload = fetch_day(client, model, point, day)
+            count = replace_hourly_day(connection, day, payload)
+            log(f"  {day}: {count} hourly")
+            time.sleep(0.3)
+            day += timedelta(days=1)
+
+
 def sync(client, connection, args):
     model = api_json(client, MODEL_PATH)
     points = api_json(client, POINTS_PATH)
@@ -625,6 +670,11 @@ def sync(client, connection, args):
 
     today = datetime.now(local_tz()).date()
     current_month = month_start(today)
+    last_run_text = meta_get(connection, "last_run_day")
+    last_run_day = (
+        datetime.strptime(last_run_text, "%Y-%m-%d").date() if last_run_text else None
+    )
+    first_run_today = last_run_day != today
 
     # The model endpoint returns an empty minDate; the data response carries it.
     current_payload = fetch_month(client, model, point, current_month)
@@ -676,6 +726,10 @@ def sync(client, connection, args):
             info = payload["infoCodes"]
         log(f"{day}: {count} hourly readings")
 
+    if first_run_today:
+        log("first run today: refreshing the previous night and filling any gaps")
+        catch_up(client, model, point, connection, today, last_run_day)
+
     if info and info.get("timestampStringFin"):
         meta_set(connection, "last_volume", info.get("volume", ""))
         meta_set(connection, "last_volume_at", info.get("timestampStringFin", ""))
@@ -691,6 +745,8 @@ def sync(client, connection, args):
             args.json,
             build_export(connection, point, info, days=args.days),
         )
+
+    meta_set(connection, "last_run_day", today.isoformat())
 
 
 # --------------------------------------------------------------------------
@@ -785,7 +841,15 @@ def print_stats(connection):
     ).fetchone()
     print(f"daily:  {daily[0]} rows, {daily[1]} .. {daily[2]}")
     print(f"hourly: {hourly[0]} rows, {hourly[1]} .. {hourly[2]}")
-    for key in ("consumption_id", "meter_id", "last_volume", "last_volume_at", "last_sync", "backfill_done"):
+    for key in (
+        "consumption_id",
+        "meter_id",
+        "last_volume",
+        "last_volume_at",
+        "last_run_day",
+        "last_sync",
+        "backfill_done",
+    ):
         print(f"{key}: {meta_get(connection, key)}")
 
 

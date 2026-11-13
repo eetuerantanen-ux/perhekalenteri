@@ -57,6 +57,44 @@ This file is the shared coordination log between **Antigravity**, **Grok Bot**, 
 
 ## Change Log
 
+### 2026-11-14 00:55 (Europe/Helsinki) — [DeepSeek Harness] — Water job becomes daytime-only with random minutes, morning catch-up, and a night-aware dashboard
+
+- **Agent**: DeepSeek Harness
+- **Changes**:
+  - **Daytime schedule with jitter**: the water job no longer runs around the clock. Cron now calls
+    `tools/run-water-cron.sh` at the top of every hour **07–23**; the launcher sleeps a random **7–21
+    minutes** and then invokes `run_evaka_cron.py --job water --json /var/www/html/water.json`. The chosen
+    delay is written to `cron.log`. Night (23–07) is idle on purpose.
+  - **Morning catch-up**: `fetch-water.py` records `last_run_day` in `water.db` and treats the first run of
+    each day specially. After the normal current/previous-month and yesterday/today fetches, it walks any
+    whole months older than the previous month and up to 14 days of missed hourly detail
+    (`VESI_CATCHUP_DAYS`, default 14) since the last successful run. The daily reading for the previous day
+    closes at 23:59, so the morning run is what makes the previous night's consumption visible.
+  - **Dashboard**: the **Vedenkulutus** card now derives the latest available day from `daily[]` instead of
+    trusting the generation-time `today`/`yesterday` fields (which go stale across midnight). It labels the
+    big reading with that day's date (`163 L` / `13.11.`), shows `Ei vielä vesidataa` when there are no daily
+    rows, and between 23–07 (or while the morning run is still pending between 07–08) shows
+    *"🌙 Yöaika — uudet lukemat näkyvät aamulla noin klo 07–07:21."* The summary pill reads
+    `💧 Vesi: 163 L (13.11.) • 2 798 L tässä kuussa`.
+  - **Docs**: `ARCHITECTURE.md` §1, §7.5 crontab, §7.7 schedule/output.
+  - **Testing**: simulated a 3-day gap (catch-up fetched 11.–12.11. hourly) and a 3-month gap (catch-up
+    fetched 2026-08 and 2026-09 daily plus the capped 14 days of hourly); both idempotent. The dashboard was
+    smoke-tested in Node with a DOM stub against the real `data.json`/`water.json` and against an empty
+    `daily[]`: card, night notice, date label, summary pill, 14 chart points, and zero errors in both states.
+- **Reasoning**:
+  - Water moves slowly and the meter closes each day at 23:59, so hourly round-the-clock polling produced no
+    new information at night while making the traffic look automated. A daytime window plus a random minute
+    removes both problems, and the morning catch-up guarantees the night's data is not lost.
+  - Deriving "latest day" from the data itself (rather than stored today/yesterday fields) keeps the card
+    honest at 00:30, when the last fetched day is no longer "yesterday" but the newest complete day.
+- **Affected Files & Components**:
+  - `fetch-water.py`, `tools/run-water-cron.sh` (new), `ARCHITECTURE.md`, `AGENT_LOG.md`; Pi: crontab,
+    `water.db` (`last_run_day` meta), `/var/www/html/index.html` (Pi-only), `/var/www/html/water.json`.
+- **Grok Bot Automation Impact**:
+  - **None.** No `.enc.json` schema or publisher file changed; the calendar remains untouched.
+- **Publish Status**:
+  - **Published via webhook**: NO — no stamped frontend file changed. The dashboard edit is Pi-only.
+
 ### 2026-11-14 00:45 (Europe/Helsinki) — [DeepSeek Harness] — Water consumption pipeline (Vesiportaali): collector, two-year local history, cozify dashboard card, hourly cron
 
 - **Agent**: DeepSeek Harness
