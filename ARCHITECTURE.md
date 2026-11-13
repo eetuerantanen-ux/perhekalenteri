@@ -329,9 +329,9 @@ There is no test suite and no linter. Anything added must be verified by hand.
 The app expects `data.enc.json` and asks for the planner password on first load, so a plain static server
 is not enough to see real data:
 
-- The planner password (`FAMILY_PLANNER_PASSWORD` for the scripts) is kept **outside git**: locally it
-  lives in `calendarpw.txt` at the repository root, which is gitignored. Never commit it, never echo it,
-  and never put it in a command line argument.
+- The planner password is kept **outside git** in `secrets.env` (gitignored) as
+  `FAMILY_PLANNER_PASSWORD` — the same variable the Raspberry Pi scripts read. Never commit it, never
+  echo it, and never pass it as a command-line argument: read it from the environment instead.
 - Serve the directory with any static server and open it in the tablet or a browser to check layout with
   empty/placeholder state.
 - To exercise real content, either enter the planner password once (it is then cached in `localStorage`),

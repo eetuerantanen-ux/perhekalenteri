@@ -57,7 +57,26 @@ This file is the shared coordination log between **Antigravity**, **Grok Bot**, 
 
 ## Change Log
 
-### 2026-11-13 23:52 (Europe/Helsinki) — [DeepSeek Harness] — Gitignore the local planner password file; verify it decrypts and correct the documented data schema
+### 2026-11-13 23:44 (Europe/Helsinki) — [DeepSeek Harness] — Planner password consolidated into `secrets.env`; docs and ignore rules follow
+
+- **Agent**: DeepSeek Harness
+- **Changes**:
+  - Eetu moved the planner password from the standalone `calendarpw.txt` into `secrets.env` as **`FAMILY_PLANNER_PASSWORD`** and deleted `calendarpw.txt`. That is the variable the Raspberry Pi scripts already read, so there is now a single gitignored secret file for both the publish webhook and the encryption key.
+  - **Verified** the new location end-to-end: reading `FAMILY_PLANNER_PASSWORD` from `secrets.env` and decrypting `data.enc.json` through the browser's WebCrypto path (PBKDF2-SHA256 @ 1 000 000 iterations → AES-256-GCM) succeeds — 5 members, 134 events, 30 daycare shifts, `paivitetty` 2026-11-13 23:29. The check printed no password and no personal values.
+  - **[`ARCHITECTURE.md`](ARCHITECTURE.md) §9** now states the password lives in gitignored `secrets.env` as `FAMILY_PLANNER_PASSWORD`, and repeats the rule: never commit it, never echo it, never pass it on a command line; read it from the environment.
+  - **`.gitignore`**: kept the `calendarpw.txt` entry as a defensive guard against the file being recreated (now with a comment saying the password has moved to `secrets.env`).
+  - Temporary verification script deleted; no plaintext data file written into the repository.
+  - **No changes** to `index.html`, `app.js`, `style.css`, `version.json`, or any generated data file.
+- **Reasoning**:
+  - Two secret files in a public repository's working tree is one more way to leak one of them. Consolidating on `secrets.env` matches what the Pi scripts and the webhook already expect, and the ignore entry for the old filename costs nothing while preventing a regression.
+- **Affected Files & Components**:
+  - `ARCHITECTURE.md` (§9); `.gitignore`; `AGENT_LOG.md`. `secrets.env` is local-only and untracked.
+- **Grok Bot Automation Impact**:
+  - **None for the schema or fetchers.** For the publisher: its `.gitignore` heredoc should carry both `secrets.env` and `calendarpw.txt` so neither can be committed by a publish run.
+- **Publish Status**:
+  - **Published via webhook**: NO (documentation/ignore change only; no stamped code file changed, so the version hash is unaffected).
+
+### 2026-11-13 23:41 (Europe/Helsinki) — [DeepSeek Harness] — Gitignore the local planner password file; verify it decrypts and correct the documented data schema
 
 - **Agent**: DeepSeek Harness
 - **Changes**:
@@ -76,7 +95,7 @@ This file is the shared coordination log between **Antigravity**, **Grok Bot**, 
 - **Publish Status**:
   - **Published via webhook**: NO (gitignore + documentation only; no stamped code file changed, so the version hash is unaffected and there is nothing to publish).
 
-### 2026-11-13 23:44 (Europe/Helsinki) — [DeepSeek Harness] — Add `ARCHITECTURE.md` (system map) and link it from the read-first rule
+### 2026-11-13 23:38 (Europe/Helsinki) — [DeepSeek Harness] — Add `ARCHITECTURE.md` (system map) and link it from the read-first rule
 
 - **Agent**: DeepSeek Harness
 - **Changes**:
@@ -93,7 +112,7 @@ This file is the shared coordination log between **Antigravity**, **Grok Bot**, 
 - **Publish Status**:
   - **Published via webhook**: NO (documentation-only change; nothing to publish and the version hash is unaffected, so the webhook was deliberately not called).
 
-### 2026-11-13 23:34 (Europe/Helsinki) — [DeepSeek Harness] — Record publish-webhook access in local `secrets.env`; connectivity test commit
+### 2026-11-13 23:28 (Europe/Helsinki) — [DeepSeek Harness] — Record publish-webhook access in local `secrets.env`; connectivity test commit
 
 - **Agent**: DeepSeek Harness
 - **Changes**:
@@ -110,7 +129,7 @@ This file is the shared coordination log between **Antigravity**, **Grok Bot**, 
 - **Publish Status**:
   - **Published via webhook**: YES (connectivity test trigger sent immediately after pushing this commit; result reported in chat rather than requiring a second commit).
 
-### 2026-11-13 23:25 (Europe/Helsinki) — [DeepSeek Harness] — Join as a third collaborating agent; document the sandboxed Git setup used for direct commits
+### 2026-11-13 23:22 (Europe/Helsinki) — [DeepSeek Harness] — Join as a third collaborating agent; document the sandboxed Git setup used for direct commits
 
 - **Agent**: DeepSeek Harness
 - **Changes**:

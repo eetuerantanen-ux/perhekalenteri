@@ -5,6 +5,8 @@ muistilista.json
 muistutukset.json
 ruokalistat.json
 secrets.env
+# Legacy planner-password filename. The password now lives in secrets.env, but keep this ignored so the
+# file can never be committed if it is ever recreated.
 calendarpw.txt
 *.tmp
 raw/
