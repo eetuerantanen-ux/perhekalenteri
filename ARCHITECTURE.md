@@ -28,7 +28,7 @@ framework, no `package.json`, no bundler and no CI.
 | `hoitovuorot.enc.json` | — | Daycare shifts, written by the Pi (`fetch-evaka.py`) |
 | `muistilista.enc.json` | — | Keep todo list, written by the Pi (`fetch-keep.py`) |
 | `ruokalistat.enc.json` | — | Daycare menus, written by the Pi (`fetch-menus.py`) |
-| `fetch-evaka.py`, `fetch-keep.py`, `fetch-menus.py` | 721 / 832 / 684 | Pi-side fetchers (Python 3, stdlib only) |
+| `fetch-evaka.py`, `fetch-keep.py`, `fetch-menus.py` | 721 / 832 / 684 | Pi-side fetchers (Python 3; evaka & menus stdlib+ctypes, keep uses gkeepapi in .venv) |
 | `AGENT_LOG.md` | — | Collaboration rules + change log |
 | `.nojekyll`, `robots.txt` | — | Serve files verbatim; keep the page out of search engines |
 
@@ -151,12 +151,13 @@ The screen is kept awake with the Wake Lock API where the browser supports it (A
 ```
       Raspberry Pi (cron)                    publisher (Grok Bot)                 browser
  ┌──────────────────────────┐            ┌───────────────────────────┐     ┌──────────────────┐
- │ fetch-evaka.py           │            │ publish.sh                │     │ app.js           │
- │  eVaka API → shifts      │──push──▶   │  decrypt .enc.json files  │     │  fetch           │
- │ fetch-keep.py            │            │  collect.py               │     │  data.enc.json   │
- │  Google Keep → todo      │──push──▶   │  encrypt.js               │────▶│  PBKDF2 + AES-GCM│
- │ fetch-menus.py           │            │  data.enc.json            │     │  renderAll()     │
- │  Aromi14 → menus         │            │  version stamping         │     │                  │
+ │ run_evaka_cron.py        │            │ publish.sh                │     │ app.js           │
+ │  ├── fetch-evaka.py      │──push──▶   │  decrypt .enc.json files  │     │  fetch           │
+ │  │   eVaka API → shifts  │            │  collect.py               │     │  data.enc.json   │
+ │  ├── fetch-keep.py       │──push──▶   │  encrypt.js               │────▶│  PBKDF2 + AES-GCM│
+ │  │   Google Keep → todo  │            │  data.enc.json            │     │  renderAll()     │
+ │  └── fetch-menus.py      │──push──▶   │  version stamping         │     │                  │
+ │      Aromi14 → menus     │            │                           │     │                  │
  └────────────┬─────────────┘            └───────────▲───────────────┘     └──────────────────┘
               │  POST webhook (Bearer key)            │
               └───────────────────────────────────────┘
@@ -186,8 +187,10 @@ Every `.enc.json` file in the repository uses the same envelope:
 ```
 
 - Key = PBKDF2-SHA256(password `FAMILY_PLANNER_PASSWORD`, salt, 1 000 000 iterations) → 256-bit AES-GCM key.
-- Browser decryption uses WebCrypto. On the Pi it uses OpenSSL `libcrypto` through `ctypes`, so **no pip
-  packages are required** — a deliberate constraint for the Raspberry Pi.
+- Browser decryption uses WebCrypto. On the Pi and publisher side, decryption and encryption for `fetch-evaka.py`
+  and `fetch-menus.py` use OpenSSL `libcrypto` through `ctypes`, so **no pip packages are required for crypto or
+  for those two fetchers**. `fetch-keep.py` additionally requires `gkeepapi` in a local virtualenv (`.venv`) for
+  Google Keep's private protocol, while its `--decrypt` flag uses only stdlib + `ctypes`.
 - The derived key is cached in `localStorage` under `perhekalenteri.avain.v1` as `{salt, iter, k}`.
   The password is therefore typed once per device; the lock screen reappears if the salt/iteration change
   (i.e. the password was rotated) or after "unohda salasana".
@@ -272,36 +275,120 @@ never construct local dates with `new Date(y, m, d)` — DST correctness depends
 
 ---
 
-## 7. Automation (Raspberry Pi)
+## 7. Automation & Raspberry Pi Environment
 
-All three scripts are Python 3, stdlib-only, run from the repository root, and read `secrets.env` next to
-them. They share the same skeleton: load secrets → fetch → diff against `.publish-state/` → encrypt →
-`git add` **only** the `.enc.json` → commit → push (max 3 attempts with rebase) → POST webhook.
+The background data collection runs on an always-on Raspberry Pi on the local home network (`pi@192.168.1.243`). It gathers daycare shifts from eVaka, todo items from Google Keep, and weekly food menus from Kouvolan Aromi14, commits the encrypted payloads to `origin/main`, and triggers the publisher via webhook.
 
-| Script | Source | Output | Flag surface |
-|---|---|---|---|
-| `fetch-evaka.py` | `varhaiskasvatus.kouvola.fi` citizen API (username/password) | `hoitovuorot.enc.json` | `--from-date`, `--to-date`, `--out-shifts`, `--decrypt`, `--decrypt-to`, `--no-git-commit`, `--no-webhook`, `--force-webhook`, `--init-state`, `--with-messages` |
-| `fetch-keep.py` | Google Keep note "Muistilista" via `gkeepapi` + master token | `muistilista.enc.json` | `--decrypt`, `--decrypt-to`, `--add`, `--remove`, `--check`, `--uncheck`, `--exchange-oauth-token` |
-| `fetch-menus.py` | Kouvola Aromi14 eMenus for two daycares (`arki` and `vuoro` role) | `ruokalistat.enc.json` | `--decrypt`, `--decrypt-to`, `--out-menus` |
+### 7.1 Host environment & hardware
 
-Safety properties worth preserving:
-
-- `git_commit_and_push_*()` refuses to `git add` any path not ending in `.enc.json`.
-- Underlying plaintext is only ever written outside the repository (or to `shared/`, which is gitignored).
-- The webhook payload also carries the plaintext diff as a fallback if the git push did not happen
-  (`--webhook-only` mode).
-- Git identity defaults to the repository owner's noreply address; a `GITHUB_TOKEN` in `secrets.env`
-  enables token-authenticated pushes instead of an interactive credential helper.
-
-### Schedules (Europe/Helsinki)
-
-| Job | Cadence |
+| Property | Value |
 |---|---|
-| App data publish (`publish.sh` via publisher) | every 30 min, 06:00–22:00, and on webhook trigger |
-| `fetch-evaka.py` (shifts) | daily 07:00, 14:00, 19:00 |
-| `fetch-keep.py` (todo) | hourly 07:00–21:00 |
-| `fetch-menus.py` (menus) | Tuesdays 14:00 |
-| Electricity prices (`fetch-prices.py`) | daily 16:00 |
+| Device | Raspberry Pi (`pi@192.168.1.243`, local LAN) |
+| Operating System | Debian GNU/Linux 11 (Bullseye), 32-bit (`armv7l`), Linux kernel 5.10 |
+| Base Python | Python 3.9.2 (`/usr/bin/python3`) |
+| Working directory | `/home/pi/perhekalenteri` (clone of `eetuerantanen-ux/perhekalenteri.git`) |
+| Log destination | `/home/pi/perhekalenteri/cron.log` |
+| Local state directory | `/home/pi/perhekalenteri/.publish-state/` (gitignored; holds salts, sent baselines, failure states) |
+
+### 7.2 Git configuration & authentication on the Pi
+
+The Pi repository clone pushes directly to GitHub Pages (`origin/main`) using HTTPS:
+
+- **Token authentication**: GitHub requires personal access tokens (PAT) for HTTPS operations. The Pi stores a fine-grained GitHub PAT in `/home/pi/perhekalenteri/secrets.env` as `GITHUB_TOKEN`. The Python fetcher git runner (`run_git`) automatically injects this token per command using `-c http.https://github.com/.extraheader="AUTHORIZATION: basic <base64>"` so interactive credential helpers or global config modifications are never needed.
+- **Git identity**: Commits are made under `eetuerantanen-ux <239039043+eetuerantanen-ux@users.noreply.github.com>`.
+- **Exclusions**: In addition to the repo `.gitignore`, `/home/pi/perhekalenteri/.git/info/exclude` ensures local configuration, log files, python bytecode, and runtime wrappers never get committed:
+  ```
+  secrets.env
+  *.log
+  .publish-state/
+  hoitovuorot.json
+  muistilista.json
+  muistutukset.json
+  ruokalistat.json
+  run_evaka_cron.py
+  .venv/
+  __pycache__/
+  *.pyc
+  ```
+
+### 7.3 Python environments & build dependencies
+
+Two Python runtimes operate on the Pi:
+
+1. **System Python (`/usr/bin/python3`, Python 3.9.2)**:
+   - Used by `fetch-evaka.py` and `fetch-menus.py`.
+   - Requires zero external pip packages. HTTP calls use `urllib.request`; encryption uses standard library `hashlib.pbkdf2_hmac` plus OpenSSL `libcrypto.so` loaded dynamically via `ctypes`.
+2. **Dedicated Virtualenv (`/home/pi/perhekalenteri/.venv`)**:
+   - Used by `fetch-keep.py` due to Google Keep requiring an unofficial API library (`gkeepapi`).
+   - **Build note for Bullseye ARMv7**: Compiling C-extensions (such as `pycryptodomex`) directly fails on Bullseye due to missing build headers in minimal installations. Therefore, prebuilt binary wheels from `piwheels.org` are installed using `--only-binary=pycryptodomex`:
+     ```bash
+     python3 -m venv /home/pi/perhekalenteri/.venv
+     /home/pi/perhekalenteri/.venv/bin/pip install --only-binary=pycryptodomex gkeepapi==0.14.2 gpsoauth==2.0.0 urllib3==1.26.20
+     ```
+   - `fetch-keep.py` includes runtime compatibility patches for `gkeepapi 0.14.2` on Python 3.9 (`keep.resume` fallback and safe `WebLink._load` handling).
+   - If invoked from system Python, `fetch-keep.py` automatically detects and re-execs itself inside `.venv/bin/python3`.
+   - **Google Keep master token**: Keep does not support standard OAuth2 user consent flows. A one-time login token (`oauth2_4/...`) generated via Google browser login is exchanged once for a permanent master token (`aas_et/...`) via `python3 fetch-keep.py --exchange-oauth-token "oauth2_4/..." --save-token`, which writes `KEEP_MASTER_TOKEN` into `secrets.env`.
+
+### 7.4 Script inventory & APIs
+
+All three scripts share the same execution lifecycle: load `secrets.env` → fetch remote API → diff against `.publish-state/*.sent.json` → encrypt (`AES-256-GCM`, `iter: 1000000`, `FAMILY_PLANNER_PASSWORD`) → `git add` **only** `.enc.json` → commit → push (with automatic rebase retry) → POST publish webhook.
+
+| Script | Source API & Protocol | Output | Flag surface |
+|---|---|---|---|
+| `fetch-evaka.py` | `varhaiskasvatus.kouvola.fi` citizen API (HTTPS session login with `EVAKA_USERNAME` & `EVAKA_PASSWORD`) | `hoitovuorot.enc.json` | `--from-date`, `--to-date`, `--out-shifts`, `--decrypt`, `--decrypt-to`, `--no-git-commit`, `--no-webhook`, `--force-webhook`, `--init-state`, `--with-messages` |
+| `fetch-keep.py` | Google Keep note "Muistilista" via `gkeepapi` + `KEEP_MASTER_TOKEN` (`.venv`) | `muistilista.enc.json` | `--decrypt`, `--decrypt-to`, `--add`, `--remove`, `--check`, `--uncheck`, `--exchange-oauth-token` |
+| `fetch-menus.py` | Kouvolan Aromi14 eMenus API for Lehvätien (`arki`) and Jaakonpuiston (`vuoro`) daycares | `ruokalistat.enc.json` | `--decrypt`, `--decrypt-to`, `--out-menus` |
+
+Safety properties:
+- `git_commit_and_push_*()` explicitly checks file extensions and refuses to `git add` any path not ending in `.enc.json`.
+- Plaintext is never written inside the tracked repository tree (only to gitignored `shared/` or temporary buffers).
+- The webhook payload includes the plaintext diff as a fallback if the git push fails (`--webhook-only` mode).
+
+### 7.5 Cron scheduling & failure alerting (`run_evaka_cron.py`)
+
+Cron on the Pi does not execute `fetch-*.py` directly. Instead, all three tasks run through a unified monitoring wrapper: `/home/pi/perhekalenteri/run_evaka_cron.py`.
+
+#### Wrapper responsibilities
+1. **Runtime routing**: Invokes `fetch-evaka.py` and `fetch-menus.py` using system Python, and `fetch-keep.py` using the `.venv` Python runtime.
+2. **Logging**: Captures stdout, stderr, and exit codes with Europe/Helsinki timestamps to `/home/pi/perhekalenteri/cron.log`.
+3. **Failure tracking**: Tracks consecutive failures per job in `.publish-state/<job>_fail_state.json`. Any successful run resets the consecutive failure counter and clears any alert state.
+4. **Email alerting via Gandi SMTP**: If any job fails **3 consecutive times** (`MAX_FAILURES = 3`), the wrapper immediately formats and sends an alert email to `eetu.e.rantanen@gmail.com` via Gandi's authenticated SMTP relay (`mail.gandi.net:465`, SSL/TLS, sender `eetu@eetu.org`, password from `/home/pi/smtp_pw` or `secrets.env`). The alert subject identifies the failing job (e.g. *"Hoitovuorojen päivitysautomaatio epäonnistui"*) and the body includes exact timestamps, exit codes, and full stderr/tracebacks of the 3 failed attempts.
+
+#### Active crontab (`crontab -l` on `pi@192.168.1.243`)
+
+```cron
+# eVaka daycare shifts (daily at 07:00, 14:00, and 19:00)
+0 7,14,19 * * * /usr/bin/python3 /home/pi/perhekalenteri/run_evaka_cron.py
+
+# Google Keep todo list (hourly between 07:00 and 21:00)
+0 7-21 * * * /usr/bin/python3 /home/pi/perhekalenteri/run_evaka_cron.py --job keep
+
+# Aromi14 daycare menus (once a week on Tuesdays at 14:00)
+0 14 * * 2 /usr/bin/python3 /home/pi/perhekalenteri/run_evaka_cron.py --job menus
+```
+
+### 7.6 Secrets & environment variables (`secrets.env`)
+
+Secrets are stored on the Pi in `/home/pi/perhekalenteri/secrets.env` with restricted permissions (`chmod 600`), never tracked in git:
+
+| Variable | Description |
+|---|---|
+| `FAMILY_PLANNER_PASSWORD` | Shared symmetric encryption passphrase used for PBKDF2-SHA256 (1M iterations) + AES-256-GCM. Identical key used for `data.enc.json`, `hoitovuorot.enc.json`, `muistilista.enc.json`, and `ruokalistat.enc.json`. |
+| `GITHUB_TOKEN` | GitHub Personal Access Token for Git push authentication to `origin/main`. |
+| `GITHUB_USER` | `eetuerantanen-ux` |
+| `GIT_REMOTE` | `https://github.com/eetuerantanen-ux/perhekalenteri.git` |
+| `EVAKA_USERNAME` | Login email for Kouvolan eVaka citizen portal (`varhaiskasvatus.kouvola.fi`). |
+| `EVAKA_PASSWORD` | eVaka login password (read from `/home/pi/evaka_pw`). |
+| `KEEP_EMAIL` | Google account email for Keep synchronization (`eetu.e.rantanen@gmail.com`). |
+| `KEEP_MASTER_TOKEN` | Permanent Google Keep master token (`aas_et/...`). |
+| `GROK_WEBHOOK_URL` | Publisher webhook endpoint (`publish.sh` trigger). |
+| `GROK_WEBHOOK_KEY` | Bearer authorization key for publisher webhook. |
+| `SMTP_HOST` | Gandi SMTP relay server (`mail.gandi.net`). |
+| `SMTP_PORT` | `465` (SSL). |
+| `SMTP_USER` | `eetu@eetu.org` |
+| `SMTP_FROM` | `eetu@eetu.org` |
+| `SMTP_PASSWORD` | Gandi mailbox password (read from `/home/pi/smtp_pw` or `secrets.env`). |
+| `ALERT_EMAIL` | Recipient address for failure alerts (`eetu.e.rantanen@gmail.com`). |
 
 ---
 

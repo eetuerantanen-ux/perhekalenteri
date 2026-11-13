@@ -57,6 +57,26 @@ This file is the shared coordination log between **Antigravity**, **Grok Bot**, 
 
 ## Change Log
 
+### 2026-11-13 23:55 (Europe/Helsinki) — [Antigravity] — Document Raspberry Pi environment, virtualenv build, failure alerting wrapper, and configuration in ARCHITECTURE.md
+
+- **Agent**: Antigravity
+- **Changes**:
+  - Expanded **[`ARCHITECTURE.md`](ARCHITECTURE.md) §7** ("Automation & Raspberry Pi Environment") to document the Raspberry Pi (`pi@192.168.1.243`, Debian 11 Bullseye, 32-bit ARMv7) setup, configuration, and runtime architecture:
+    1. **Host environment & Git configuration (§7.1, §7.2)**: Documented system specs, repository location (`/home/pi/perhekalenteri`), `.git/info/exclude` rules, and automated HTTPS git push authentication using `GITHUB_TOKEN` from `secrets.env` via HTTP extra headers.
+    2. **Python environments & virtualenv build (§7.3)**: Documented the dual-runtime setup — system Python 3.9 for `fetch-evaka.py` and `fetch-menus.py` (zero pip dependencies, ctypes OpenSSL libcrypto), and dedicated virtualenv `/home/pi/perhekalenteri/.venv` for `fetch-keep.py` with prebuilt ARMv7 wheels (`--only-binary=pycryptodomex` from piwheels), runtime `gkeepapi 0.14.2` patches, and one-time OAuth token exchange to permanent `KEEP_MASTER_TOKEN`.
+    3. **Cron wrapper & failure alerting (§7.5)**: Documented `/home/pi/perhekalenteri/run_evaka_cron.py`, per-job state tracking in `.publish-state/`, and automatic email alerts sent via Gandi authenticated SMTP (`mail.gandi.net:465`, SSL, `From: eetu@eetu.org`, `To: eetu.e.rantanen@gmail.com`) when any job fails 3 consecutive times.
+    4. **Crontab & secrets inventory (§7.5, §7.6)**: Documented the active crontab schedules and full environment variable specification in `secrets.env`.
+  - Updated Section 1 (table), Section 4 (data flow diagram with `run_evaka_cron.py`), and Section 5 (crypto/dependency constraints) in `ARCHITECTURE.md`.
+- **Reasoning**:
+  - Keeps `ARCHITECTURE.md` as an accurate and complete technical map of the entire system for all collaborating agents (Antigravity, Grok Bot, DeepSeek Harness).
+- **Affected Files & Components**:
+  - `ARCHITECTURE.md` (§1, §4, §5, §7)
+  - `AGENT_LOG.md`
+- **Grok Bot Automation Impact**:
+  - **None**: Documentation update only.
+- **Publish Status**:
+  - **Published via webhook**: NO (docs-only change; no stamped code file modified).
+
 ### 2026-11-13 23:44 (Europe/Helsinki) — [DeepSeek Harness] — Planner password consolidated into `secrets.env`; docs and ignore rules follow
 
 - **Agent**: DeepSeek Harness
