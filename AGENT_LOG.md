@@ -4,7 +4,7 @@ This file is the shared coordination log between **Antigravity**, **Grok Bot**, 
 
 ## Collaboration Rules for All Agents
 
-1. **Read First**: Before planning or making any code, style, or automation changes, always read this file (`AGENT_LOG.md`) first to see recent changes made by the other agents.
+1. **Read First**: Before planning or making any code, style, or automation changes, always read this file (`AGENT_LOG.md`) first to see recent changes made by the other agents, and [`ARCHITECTURE.md`](ARCHITECTURE.md) for the technical map of the system.
 2. **Preserve Changes (Important for Grok Bot's Publish Script)**:
    - Antigravity and DeepSeek Harness may commit updates directly to `index.html`, `app.js`, `style.css`, and `AGENT_LOG.md` in this GitHub repository.
    - If Grok Bot publishes from a local working directory or template directory, Grok Bot **must** sync/pull changes from `origin/main` before publishing so it does not overwrite edits made by Antigravity (such as `index.html` template files, `app.js`, `style.css`, or `AGENT_LOG.md`).
@@ -56,6 +56,23 @@ This file is the shared coordination log between **Antigravity**, **Grok Bot**, 
 ---
 
 ## Change Log
+
+### 2026-11-13 23:44 (Europe/Helsinki) — [DeepSeek Harness] — Add `ARCHITECTURE.md` (system map) and link it from the read-first rule
+
+- **Agent**: DeepSeek Harness
+- **Changes**:
+  - Added **[`ARCHITECTURE.md`](ARCHITECTURE.md)** to the repository root: a technical map verified against the current code, covering the repository layout, deployment (GitHub Pages, legacy branch build from `main`, no build step), the version-stamping/cache-busting contract, the frontend structure (`index.html` / `app.js` / `style.css` division, render model, hash-routed views, idle timeout, runtime card scrolling), the data flow Pi → publisher → browser, the `AES-256-GCM` + `PBKDF2-SHA256` envelope and the decrypted `data.enc.json` schema, `prices.json` / `forecast.json` / `version.json` shapes, the care-shift domain rules (meal windows, `arki`/`vuoro` selection, 16:00 menu rollover), the three Raspberry Pi scripts and their schedules, contributor rules, local testing options (`?nyt`, `?tila`, localhost `data.json` fallback), and known constraints.
+  - Updated collaboration **rule 1** to point at `ARCHITECTURE.md` alongside `AGENT_LOG.md`.
+  - Documentation contains **no secrets** and **no personal data**: webhook credential names only (`GROK_WEBHOOK_URL` / `GROK_WEBHOOK_KEY`, `FAMILY_PLANNER_PASSWORD`), no family member names, and daycares referred to by role (`arki` / `vuoro`) rather than name.
+  - **No changes** to `index.html`, `app.js`, `style.css`, `version.json`, or any generated data file.
+- **Reasoning**:
+  - The repository had no README or architecture documentation at all; the only durable knowledge was the change history in this log. A standing document lowers the cost of onboarding a fourth agent (or a human) and records the invariants that break the pipeline when ignored — generated files, version-stamp hooks, no-plaintext rule, sync-before-push.
+- **Affected Files & Components**:
+  - `ARCHITECTURE.md` (new); `AGENT_LOG.md` (rule 1 + this entry).
+- **Grok Bot Automation Impact**:
+  - **None**: `ARCHITECTURE.md` is not one of the stamped code files and new files are preserved untouched by the publish routine. No schema, fetcher, or publish-script change; no version-hash impact.
+- **Publish Status**:
+  - **Published via webhook**: NO (documentation-only change; nothing to publish and the version hash is unaffected, so the webhook was deliberately not called).
 
 ### 2026-11-13 23:34 (Europe/Helsinki) — [DeepSeek Harness] — Record publish-webhook access in local `secrets.env`; connectivity test commit
 
