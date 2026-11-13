@@ -16,3 +16,7 @@ reference/
 .venv/
 __pycache__/
 *.pyc
+water.db
+water.db-wal
+water.db-shm
+water.json

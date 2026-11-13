@@ -29,6 +29,8 @@ framework, no `package.json`, no bundler and no CI.
 | `muistilista.enc.json` | — | Keep todo list, written by the Pi (`fetch-keep.py`) |
 | `ruokalistat.enc.json` | — | Daycare menus, written by the Pi (`fetch-menus.py`) |
 | `fetch-evaka.py`, `fetch-keep.py`, `fetch-menus.py` | 721 / 832 / 684 | Pi-side fetchers (Python 3; evaka & menus stdlib+ctypes, keep uses gkeepapi in .venv) |
+| `fetch-water.py` | ~840 | Pi-side Vesiportaali (Kouvolan Vesi) water collector; stdlib only, SQLite history, JSON export |
+| `tools/provision-vesi.ps1` | — | Windows helper: stores the `VESI_*` credentials in the Pi's `secrets.env` over SSH |
 | `AGENT_LOG.md` | — | Collaboration rules + change log |
 | `.nojekyll`, `robots.txt` | — | Serve files verbatim; keep the page out of search engines |
 
@@ -172,6 +174,11 @@ The screen is kept awake with the Wake Lock API where the browser supports it (A
 Plaintext personal data never enters git: only `.enc.json` files (and the generated `data.enc.json`) are
 committed. `.gitignore` covers `data.json`, `hoitovuorot.json`, `muistilista.json`, `muistutukset.json`,
 `ruokalistat.json`, `secrets.env`, `shared/`, `raw/`, `.publish-state/` and friends.
+
+**Water is a separate branch for now.** `fetch-water.py` talks to Vesiportaali, keeps a two-year SQLite
+history in `water.db` on the Pi, and writes `/var/www/html/water.json` for the cozify-logger dashboard.
+It deliberately does **not** write an `.enc.json` file yet: the family-calendar adapter (§7.7) is prepared
+but the publisher's `collect.py`/`publish.sh` would need to learn about it first.
 
 ---
 
@@ -331,13 +338,16 @@ Two Python runtimes operate on the Pi:
 
 ### 7.4 Script inventory & APIs
 
-All three scripts share the same execution lifecycle: load `secrets.env` → fetch remote API → diff against `.publish-state/*.sent.json` → encrypt (`AES-256-GCM`, `iter: 1000000`, `FAMILY_PLANNER_PASSWORD`) → `git add` **only** `.enc.json` → commit → push (with automatic rebase retry) → POST publish webhook.
+The three `.enc.json` scripts share the same execution lifecycle: load `secrets.env` → fetch remote API → diff against `.publish-state/*.sent.json` → encrypt (`AES-256-GCM`, `iter: 1000000`, `FAMILY_PLANNER_PASSWORD`) → `git add` **only** `.enc.json` → commit → push (with automatic rebase retry) → POST publish webhook.
 
 | Script | Source API & Protocol | Output | Flag surface |
 |---|---|---|---|
 | `fetch-evaka.py` | `varhaiskasvatus.kouvola.fi` citizen API (HTTPS session login with `EVAKA_USERNAME` & `EVAKA_PASSWORD`) | `hoitovuorot.enc.json` | `--from-date`, `--to-date`, `--out-shifts`, `--decrypt`, `--decrypt-to`, `--no-git-commit`, `--no-webhook`, `--force-webhook`, `--init-state`, `--with-messages` |
 | `fetch-keep.py` | Google Keep note "Muistilista" via `gkeepapi` + `KEEP_MASTER_TOKEN` (`.venv`) | `muistilista.enc.json` | `--decrypt`, `--decrypt-to`, `--add`, `--remove`, `--check`, `--uncheck`, `--exchange-oauth-token` |
 | `fetch-menus.py` | Kouvolan Aromi14 eMenus API for Lehvätien (`arki`) and Jaakonpuiston (`vuoro`) daycares | `ruokalistat.enc.json` | `--decrypt`, `--decrypt-to`, `--out-menus` |
+
+`fetch-water.py` is the fourth Pi script and follows the same "load secrets → fetch → store" shape, but it
+is intentionally outside the encrypt/commit/webhook pipeline for now; see §7.7.
 
 Safety properties:
 - `git_commit_and_push_*()` explicitly checks file extensions and refuses to `git add` any path not ending in `.enc.json`.
@@ -346,10 +356,10 @@ Safety properties:
 
 ### 7.5 Cron scheduling & failure alerting (`run_evaka_cron.py`)
 
-Cron on the Pi does not execute `fetch-*.py` directly. Instead, all three tasks run through a unified monitoring wrapper: `/home/pi/perhekalenteri/run_evaka_cron.py`.
+Cron on the Pi does not execute `fetch-*.py` directly. Instead, all scheduled tasks run through a unified monitoring wrapper: `/home/pi/perhekalenteri/run_evaka_cron.py`.
 
 #### Wrapper responsibilities
-1. **Runtime routing**: Invokes `fetch-evaka.py` and `fetch-menus.py` using system Python, and `fetch-keep.py` using the `.venv` Python runtime.
+1. **Runtime routing**: Invokes `fetch-evaka.py`, `fetch-menus.py` and `fetch-water.py` using system Python, and `fetch-keep.py` using the `.venv` Python runtime.
 2. **Logging**: Captures stdout, stderr, and exit codes with Europe/Helsinki timestamps to `/home/pi/perhekalenteri/cron.log`.
 3. **Failure tracking**: Tracks consecutive failures per job in `.publish-state/<job>_fail_state.json`. Any successful run resets the consecutive failure counter and clears any alert state.
 4. **Email alerting via Gandi SMTP**: If any job fails **3 consecutive times** (`MAX_FAILURES = 3`), the wrapper immediately formats and sends an alert email to `eetu.e.rantanen@gmail.com` via Gandi's authenticated SMTP relay (`mail.gandi.net:465`, SSL/TLS, sender `eetu@eetu.org`, password from `/home/pi/smtp_pw` or `secrets.env`). The alert subject identifies the failing job (e.g. *"Hoitovuorojen päivitysautomaatio epäonnistui"*) and the body includes exact timestamps, exit codes, and full stderr/tracebacks of the 3 failed attempts.
@@ -365,6 +375,9 @@ Cron on the Pi does not execute `fetch-*.py` directly. Instead, all three tasks 
 
 # Aromi14 daycare menus (once a week on Tuesdays at 14:00)
 0 14 * * 2 /usr/bin/python3 /home/pi/perhekalenteri/run_evaka_cron.py --job menus
+
+# Vesiportaali water consumption (hourly at :07)
+7 * * * * /usr/bin/python3 /home/pi/perhekalenteri/run_evaka_cron.py --job water --json /var/www/html/water.json
 ```
 
 > **Also present in the same crontab**: an unrelated `cozify-logger` job runs every 10 minutes
@@ -385,6 +398,11 @@ Secrets are stored on the Pi in `/home/pi/perhekalenteri/secrets.env` with restr
 | `EVAKA_PASSWORD` | eVaka login password (read from `/home/pi/evaka_pw`). |
 | `KEEP_EMAIL` | Google account email for Keep synchronization (`eetu.e.rantanen@gmail.com`). |
 | `KEEP_MASTER_TOKEN` | Permanent Google Keep master token (`aas_et/...`). |
+| `VESI_EMAIL` | Vesiportaali local-account email (same account that signs in with Google). |
+| `VESI_PASSWORD` | Vesiportaali local-account password, mode `600`; used by `fetch-water.py` only. |
+| `VESI_PROVIDER` | Vesiportaali tenant slug (`vesiportaali.kouvolanvesi.fi`). |
+| `VESI_HISTORY_START` | Optional `YYYY-MM-DD` floor for the first backfill; defaults to two years back. |
+| `VESI_CONSUMPTION_ID` | Optional consumption-point id when the account has several. |
 | `GROK_WEBHOOK_URL` | Publisher webhook endpoint (`publish.sh` trigger). |
 | `GROK_WEBHOOK_KEY` | Bearer authorization key for publisher webhook. |
 | `SMTP_HOST` | Gandi SMTP relay server (`mail.gandi.net`). |
@@ -396,7 +414,8 @@ Secrets are stored on the Pi in `/home/pi/perhekalenteri/secrets.env` with restr
 
 **Observed state, verified on the live Pi 2026-11-14 via SSH**: `secrets.env` contains
 `FAMILY_PLANNER_PASSWORD`, `GITHUB_TOKEN`, `GITHUB_USER`, `GIT_REMOTE`, `EVAKA_USERNAME`, `EVAKA_PASSWORD`,
-`KEEP_EMAIL`, `KEEP_MASTER_TOKEN`, **`GROK_WEBHOOK_URL`** and **`GROK_WEBHOOK_KEY`** (mode `600`, backup at
+`KEEP_EMAIL`, `KEEP_MASTER_TOKEN`, **`VESI_EMAIL`**, **`VESI_PASSWORD`**, **`VESI_PROVIDER`**,
+**`GROK_WEBHOOK_URL`** and **`GROK_WEBHOOK_KEY`** (mode `600`, backup at
 `/home/pi/secrets.env.bak`). Notes:
 
 - **The webhook was missing until 2026-11-14** and has since been added, so the Pi now triggers the publisher
@@ -408,6 +427,59 @@ Secrets are stored on the Pi in `/home/pi/perhekalenteri/secrets.env` with restr
 - **SMTP is not configured in `secrets.env`** and does not need to be: `run_evaka_cron.py` carries the
   `mail.gandi.net` defaults and reads the password from `/home/pi/smtp_pw`, so failure alerting works as-is.
 - The Pi also keeps the eVaka password in `/home/pi/evaka_pw`, outside the repository.
+
+### 7.7 Water consumption (`fetch-water.py`, Vesiportaali)
+
+**Source.** `https://vesiportaali.elkome.com` is one multi-tenant ASP.NET Core Identity app. The tenant is
+selected with a `provider=vesiportaali.kouvolanvesi.fi` cookie, and Google is an external login. The owner
+also added a **local password** under *My Account* so the Pi can sign in without a browser.
+
+**Auth.** `fetch-water.py` posts the normal Identity form (`Input.Email`, `Input.Password`, antiforgery
+token), stores the session as `.publish-state/vesi-cookies.json` (mode `600`), reuses it, and only logs in
+again when the API redirects to `/Identity/Account/Login`. Credentials live in `VESI_*` (§7.6) and are
+provisioned with `tools/provision-vesi.ps1`, which prompts locally and pipes them to the Pi over SSH
+without exposing them in argv, shell history or the repository.
+
+**API.** The same JSON calls the AngularJS page makes:
+
+| Call | Purpose |
+|---|---|
+| `GET /ConsumptionData/GetConsumptionDataModel` | modes, periods, date format, `minDate` (empty until a data call) |
+| `GET /ConsumptionData/GetConsumptionPoints` | consumption point + meter ids, latest `infoCodes` |
+| `POST /ConsumptionData/GetConsumptionData` | `{mode, period, beginDate, endDate, consumptionId, meterId}` → `data[]` of `{timestamp, timestampEnd, value}` |
+
+- `period=DAY` → hourly rows (litres per interval, ~24 per day); `period=MONTH` → daily rows (litres per
+  day); `period=YEAR` → monthly totals. `mode=CONSUMPTION` is used; `mode=CUMULATIVE` returns m³.
+- Timestamps are Finnish wall clock (`dd.MM.yyyy HH:mm`); `infoCodes.volume` is the latest cumulative
+  reading in m³ and `infoCodes.timestampStringFin` its time. `infoCodes.infoCodesList` carries the portal's
+  `DRY` / `REVERSE` / `LEAK` / `BURST` flags, exported as `alerts`.
+- History is about two years (first data 2024-11-14, account created 2023-06). The first run backfills the
+  last 730 days month by month; later runs refresh the current and previous month plus the last two days of
+  hourly data.
+
+**Storage.** `water.db` on the Pi (WAL) with `daily(day PRIMARY KEY, liters)`, `hourly(ts PRIMARY KEY, day,
+local, liters)` and a small `meta` table. The hourly rows for a day are replaced as a unit, because the
+meter's timestamps drift slightly between reports (05:58 vs 06:00); daily rows are upserted by date. The
+database, its `-wal`/`-shm` files and `water.json` are excluded through `.git/info/exclude`, because
+`.gitignore` is publisher-owned (§8 rule 8).
+
+**Output.** `/var/www/html/water.json`, written atomically and served next to `data.json`. It contains the
+meter reading, active alerts, today/yesterday, week/month/year totals, the last 30 days and the last 24
+hourly readings. The cozify dashboard (`/var/www/html/index.html`, Pi-only, backup
+`index.html.bak-20261114`) fetches it and renders a **Vedenkulutus** card with a 14-day bar chart and a
+summary pill.
+
+**Schedule.** Hourly at `:07` through `run_evaka_cron.py --job water --json /var/www/html/water.json`, so
+it inherits the 3-consecutive-failure email alert. Manual commands: `--login-test`, `--probe`, `--backfill`,
+`--verify`, `--show-config`.
+
+**Family calendar (future).** The `daily` table is the interface: an adapter can emit `water.enc.json` with
+the same AES-GCM envelope and let `collect.py`/`publish.sh` include it in `data.enc.json`. This is not
+enabled yet because it needs a publisher-side change (Grok Bot); until then the calendar is untouched.
+
+> **Terms-of-service note:** Vesiportaali's terms prohibit automatic copying of site information to other
+> systems without permission. This is a personal-use automation of the owner's own meter, but the clean
+> long-term route is to ask `support.vesiportaali@elkome.com` about official API access.
 
 ---
 
@@ -429,6 +501,9 @@ Secrets are stored on the Pi in `/home/pi/perhekalenteri/secrets.env` with restr
    publish, so additions made in this repository are wiped within 30 minutes. Verified: a `calendarpw.txt`
    rule added here disappeared in publish commit `b75e62c`. Durable ignore rules must be requested on the
    publisher side (`publish.sh`); this repository only keeps the entries that heredoc already emits.
+9. **Generated water artifacts stay out of git** — `water.db`, `water.db-wal`, `water.db-shm` and
+   `water.json`. Their durable ignore rules live in the Pi's `.git/info/exclude`, not in `.gitignore`
+   (rule 8).
 
 ---
 
@@ -467,3 +542,6 @@ is not enough to see real data:
   `AGENT_LOG.md` discipline.
 - **Data staleness is visible but silent.** The footer warns after 3 hours; there is no alerting inside
   the page beyond that.
+- **Water has no calendar adapter yet.** `fetch-water.py` already keeps the daily/hourly history a
+  `water.enc.json` feed would need; wiring it into `data.enc.json` requires a `collect.py`/`publish.sh`
+  change on the publisher side (Grok Bot), so the calendar is untouched for now.

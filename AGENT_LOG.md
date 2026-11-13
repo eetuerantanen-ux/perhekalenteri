@@ -57,6 +57,53 @@ This file is the shared coordination log between **Antigravity**, **Grok Bot**, 
 
 ## Change Log
 
+### 2026-11-14 00:45 (Europe/Helsinki) — [DeepSeek Harness] — Water consumption pipeline (Vesiportaali): collector, two-year local history, cozify dashboard card, hourly cron
+
+- **Agent**: DeepSeek Harness
+- **Changes**:
+  - **New `fetch-water.py`** (Pi, Python 3 stdlib only). Signs in to `vesiportaali.elkome.com` with the
+    local account created under *My Account* (the account still uses Google for interactive login), reuses
+    the cached session cookie in `.publish-state/vesi-cookies.json` (mode `600`), and calls the same JSON
+    API the AngularJS page uses: `GetConsumptionDataModel`, `GetConsumptionPoints`, and
+    `POST GetConsumptionData` with `{mode, period, beginDate, endDate, consumptionId, meterId}`.
+  - **Data model**: `period=DAY` → hourly litres, `MONTH` → daily litres, `YEAR` → monthly totals.
+    `infoCodes.volume` is the live cumulative reading (m³) plus `DRY`/`REVERSE`/`LEAK`/`BURST` flags.
+    The first run backfilled **730 days** (2024-11-14 … 2026-11-13, the portal's two-year window) into a
+    new SQLite database `water.db` (`daily`, `hourly`, `meta`); later runs refresh the current and previous
+    month plus the last two days of hourly data. Hourly rows are replaced per day because the meter's
+    timestamps drift slightly between reports (05:58 vs 06:00).
+  - **Export**: `/var/www/html/water.json`, written atomically, with meter reading, alerts, today/yesterday,
+    week/month/year totals, the last 30 days and the last 24 hourly readings.
+  - **New `tools/provision-vesi.ps1`**: prompts for the portal email/password with
+    `Read-Host -AsSecureString`, base64s the payload and pipes it over SSH into
+    `/home/pi/perhekalenteri/secrets.env` as `VESI_EMAIL` / `VESI_PASSWORD` / `VESI_PROVIDER` (mode `600`,
+    backup at `/home/pi/secrets.env.bak`). The password never entered argv, a local file, or this log.
+  - **Cozify dashboard** (`/var/www/html/index.html`, Pi-only): new **Vedenkulutus** section with a card
+    (meter reading, today/yesterday, week/month/year, 14-day bar chart) and a summary pill; `water.json` is
+    fetched next to `data.json`. Pre-change backup: `/var/www/html/index.html.bak-20261114`.
+  - **Cron**: `run_evaka_cron.py` gained a `water` job; crontab runs it hourly at `:07` with
+    `--json /var/www/html/water.json`, so it inherits the 3-consecutive-failure email alert.
+  - **Docs**: `ARCHITECTURE.md` §1, §4, §7.4–§7.7, §8 rule 9, §10; `.gitignore` water entries (ephemeral,
+    see §8 rule 8) and durable `.git/info/exclude` rules on the Pi.
+- **Reasoning**:
+  - One collector, one local history, two consumers: the cozify dashboard reads `water.json` now, and the
+    family calendar can later read the same SQLite history through a thin `water.enc.json` adapter. Keeping
+    the portal session and the two-year retention outside the calendar avoids coupling the two projects.
+  - The portal's own terms cap online history at two years, so an early backfill was worth doing now; the
+    daily series is authoritative and the hourly series only feeds the recent chart.
+- **Affected Files & Components**:
+  - `fetch-water.py` (new), `tools/provision-vesi.ps1` (new), `ARCHITECTURE.md`, `AGENT_LOG.md`,
+    `.gitignore`; Pi: `run_evaka_cron.py`, crontab, `/var/www/html/index.html`, `/var/www/html/water.json`,
+    `/home/pi/perhekalenteri/water.db`, `/home/pi/perhekalenteri/secrets.env`.
+- **Grok Bot Automation Impact**:
+  - **None now.** No `.enc.json` schema or publisher file changed; the calendar is untouched.
+  - **Future (when the calendar should show water)**: `collect.py`/`publish.sh` must decrypt and include a
+    `water.enc.json` (same AES-GCM envelope), and `app.js` needs a water card. The Pi-side daily history is
+    already in place for that adapter.
+- **Publish Status**:
+  - **Published via webhook**: NO — no stamped frontend file (`index.html`/`app.js`/`style.css`) changed in
+    this repository. The dashboard edit is Pi-only, not part of the GitHub Pages site.
+
 ### 2026-11-14 00:20 (Europe/Helsinki) — [DeepSeek Harness] — Pi gains webhook credentials; end-to-end publish verified; `.gitignore` found to be publisher-owned
 
 - **Agent**: DeepSeek Harness
