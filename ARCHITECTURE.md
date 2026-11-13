@@ -367,6 +367,10 @@ Cron on the Pi does not execute `fetch-*.py` directly. Instead, all three tasks 
 0 14 * * 2 /usr/bin/python3 /home/pi/perhekalenteri/run_evaka_cron.py --job menus
 ```
 
+> **Also present in the same crontab**: an unrelated `cozify-logger` job runs every 10 minutes
+> (`*/10 * * * * /home/pi/cozify-logger/venv/bin/python …/logger.py`). It does not belong to this project —
+> leave it alone when editing the crontab, and do not mistake its output for kalenteri activity.
+
 ### 7.6 Secrets & environment variables (`secrets.env`)
 
 Secrets are stored on the Pi in `/home/pi/perhekalenteri/secrets.env` with restricted permissions (`chmod 600`), never tracked in git:
@@ -389,6 +393,19 @@ Secrets are stored on the Pi in `/home/pi/perhekalenteri/secrets.env` with restr
 | `SMTP_FROM` | `eetu@eetu.org` |
 | `SMTP_PASSWORD` | Gandi mailbox password (read from `/home/pi/smtp_pw` or `secrets.env`). |
 | `ALERT_EMAIL` | Recipient address for failure alerts (`eetu.e.rantanen@gmail.com`). |
+
+**Observed state, verified on the live Pi 2026-11-14 via SSH**: `secrets.env` currently contains only
+`FAMILY_PLANNER_PASSWORD`, `GITHUB_TOKEN`, `GITHUB_USER`, `GIT_REMOTE`, `EVAKA_USERNAME`, `EVAKA_PASSWORD`,
+`KEEP_EMAIL` and `KEEP_MASTER_TOKEN`. There are **no `GROK_WEBHOOK_*` and no `SMTP_*` entries**, so:
+
+- The SMTP settings in the table above come from defaults inside `run_evaka_cron.py`, with the password read
+  from `/home/pi/smtp_pw`; alerting works without those variables being present in `secrets.env`.
+- `webhook_url` is empty for all three fetchers. When a job detects a change it still encrypts, commits and
+  pushes, then prints `… GROK_WEBHOOK_URL puuttuu secrets.env-tiedostosta` and **skips the webhook**. The new
+  data therefore goes live on the publisher's next scheduled 30-minute run (06:00–22:00) rather than
+  immediately, and a change made after 22:00 waits until the next morning.
+- Adding `GROK_WEBHOOK_URL` and `GROK_WEBHOOK_KEY` to the Pi's `secrets.env` (the same values the local
+  clone holds) restores immediate publishing. This does not affect correctness of the data, only latency.
 
 ---
 

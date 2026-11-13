@@ -57,6 +57,31 @@ This file is the shared coordination log between **Antigravity**, **Grok Bot**, 
 
 ## Change Log
 
+### 2026-11-14 00:08 (Europe/Helsinki) — [DeepSeek Harness] — SSH access to the Raspberry Pi established; first health check and two documentation corrections
+
+- **Agent**: DeepSeek Harness
+- **Changes**:
+  - **SSH access**: generated a dedicated ed25519 keypair on this machine (`~/.ssh/id_ed25519`, comment `dsh-deepseek-harness`) and installed the public key in `pi@192.168.1.243:~/.ssh/authorized_keys`. Verified key-only login (`ssh -o BatchMode=yes`), i.e. no password is required or stored anywhere. The Pi's password was intentionally **not** collected or saved.
+  - **First health check (read-only)** — all green:
+    - host `raspberrypi`, `pi@192.168.1.243`, `Linux 5.10.103-v7l+ armv7l`, uptime 45 days.
+    - system Python 3.9.2 and `/home/pi/perhekalenteri/.venv` Python 3.9.2 both present.
+    - `cron` service active; the repo clone is at `6a98fa4` with a **clean** working tree.
+    - `cron.log` shows the 19:00 evaka/keep runs and the 20:00/21:00 keep runs with `exit=0`, "no changes" — i.e. the collectors are healthy and correctly idle.
+    - Root filesystem 21 GB of 30 GB used (74 %) — worth watching but not urgent.
+  - **Documentation corrections in [`ARCHITECTURE.md`](ARCHITECTURE.md) §7**:
+    1. **§7.5**: noted that the live crontab also contains an unrelated `cozify-logger` job (every 10 min) that is not part of this project.
+    2. **§7.6**: recorded the *observed* contents of the Pi's `secrets.env` and the consequence that `GROK_WEBHOOK_*` and `SMTP_*` are **not** set there. SMTP works from `run_evaka_cron.py` defaults plus `/home/pi/smtp_pw`; the webhook does not fire at all, so Pi-originated changes still push to git but publish only on the next scheduled 30-minute run (06:00–22:00). Data correctness is unaffected — only publish latency — and adding the two `GROK_WEBHOOK_*` variables to the Pi would restore immediate publishing.
+  - **Operating notes for future agents** (Windows-specific): pass remote scripts by piping them into `ssh … bash -s` rather than as an inline argument, because PowerShell strips the inner quotes; and add `-o UpdateHostKeys=no` so ssh does not try (and fail) to rewrite `known_hosts` inside the sandbox.
+  - **No changes** to any code file, generated data file, or the Pi itself.
+- **Reasoning**:
+  - Calendar symptoms often originate upstream of the page (stale or missing data), so being able to read the Pi's cron log and failure counters turns "the card is wrong" into a diagnosable question. Doing it with a key instead of the Pi password avoids spreading a credential that also unlocks `GITHUB_TOKEN`, eVaka and Google Keep. The two doc corrections exist because the numbers in a document that disagrees with the machine are worse than no document.
+- **Affected Files & Components**:
+  - `ARCHITECTURE.md` (§7.5, §7.6); `AGENT_LOG.md`. Remote access setup on this workstation (`~/.ssh/id_ed25519`), `authorized_keys` on the Pi.
+- **Grok Bot Automation Impact**:
+  - **Recommended, optional**: add `GROK_WEBHOOK_URL` / `GROK_WEBHOOK_KEY` to `/home/pi/perhekalenteri/secrets.env` to restore immediate webhook publishing from the Pi. No schema or fetcher change needed.
+- **Publish Status**:
+  - **Published via webhook**: NO (documentation-only change; no stamped code file changed).
+
 ### 2026-11-13 23:55 (Europe/Helsinki) — [Antigravity] — Document Raspberry Pi environment, virtualenv build, failure alerting wrapper, and configuration in ARCHITECTURE.md
 
 - **Agent**: Antigravity
