@@ -57,6 +57,25 @@ This file is the shared coordination log between **Antigravity**, **Grok Bot**, 
 
 ## Change Log
 
+### 2026-11-13 23:52 (Europe/Helsinki) — [DeepSeek Harness] — Gitignore the local planner password file; verify it decrypts and correct the documented data schema
+
+- **Agent**: DeepSeek Harness
+- **Changes**:
+  - **`.gitignore`**: added `calendarpw.txt`. The local planner-password file was sitting **untracked but not ignored** at the repository root, so any `git add -A` in this clone (which is how the publish routine stages its working copy) would have committed a plaintext password to this public repository. `git check-ignore` now confirms it is excluded.
+  - **Verified the password** with the same WebCrypto path the browser uses — PBKDF2-SHA256 (1 000 000 iterations) over the envelope salt → AES-256-GCM decrypt of `data.enc.json`. Result: decryption succeeds; envelope confirmed as 16-byte salt, 12-byte IV, ~211 KB ciphertext. The check printed **only** field names and counts, never the password or any personal values.
+  - **Corrected [`ARCHITECTURE.md`](ARCHITECTURE.md) §5** against the decrypted payload: added the previously undocumented top-level keys `aikavyohyke`, `kalenterit[{kalenteri, ok, tapahtumia}]` and `viikkonumerot{ "YYYY-MM-DD": "Viikko 44 / 2026" }`; documented the real `ruokalistat[]` fields (`henkilot`, `lahde`, `koodi`, `ryhma`, `ok`, and `ruoat[].merkinnat`); completed `saa` (`paikka`, `nyt.sade`, `tunnit[].sade_tn`); noted that only shift events carry `puokkari` / `puokkari_kuka`; and recorded the verified snapshot (134 events / 30 shifts / 5 members / 2 menu lists of 38+57 days / 16 forecast days / 0 errors).
+  - **`ARCHITECTURE.md` §9** now says where the password lives locally (`calendarpw.txt`, gitignored) and repeats the rule: never commit it, never echo it, never pass it as a command-line argument.
+  - Temporary verification scripts were deleted; no plaintext data file was written to the repository.
+  - **No changes** to `index.html`, `app.js`, `style.css`, `version.json`, or any generated data file.
+- **Reasoning**:
+  - A plaintext password inside a public repository's working tree is a leak waiting for one careless `git add -A`, so it belongs in `.gitignore` next to `secrets.env`. Having the password also made it possible to replace the schema I had inferred by reading `app.js` with the schema the payload actually has, which is what future coding work will rely on.
+- **Affected Files & Components**:
+  - `.gitignore` (`calendarpw.txt`); `ARCHITECTURE.md` (§5 and §9); `AGENT_LOG.md`.
+- **Grok Bot Automation Impact**:
+  - **None**: no fetched data, schema, or publish-script change. Note for the publisher: its `.gitignore` heredoc should also carry `calendarpw.txt` so the exclusion survives a publish run, in the same spirit as `secrets.env`.
+- **Publish Status**:
+  - **Published via webhook**: NO (gitignore + documentation only; no stamped code file changed, so the version hash is unaffected and there is nothing to publish).
+
 ### 2026-11-13 23:44 (Europe/Helsinki) — [DeepSeek Harness] — Add `ARCHITECTURE.md` (system map) and link it from the read-first rule
 
 - **Agent**: DeepSeek Harness

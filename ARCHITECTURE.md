@@ -195,26 +195,35 @@ Every `.enc.json` file in the repository uses the same envelope:
 
 ### `data.enc.json` — decrypted payload
 
-The decrypted object is the single source of truth for the whole UI:
+The decrypted object is the single source of truth for the whole UI. The shapes below were verified
+against a real decrypted payload (`paivitetty` 2026-11-13 23:29) — at that moment: 134 events
+(30 of them daycare shifts), 5 members, 2 menu lists (38 + 57 days), 16 forecast days, 0 collection errors.
 
 | Key | Shape |
 |---|---|
+| `paivitetty` | ISO timestamp; drives the "Päivitetty" status and the staleness warning (`STALE_MIN` = 180) |
+| `aikavyohyke` | `"Europe/Helsinki"` — informational; the UI hard-codes the same zone |
 | `jasenet` | `{ key: { nimi, tunnus, vari } }` — member id, display name, avatar initials, colour. `pyha` is the holiday pseudo-member |
-| `tapahtumat` | `[{ alku, loppu, otsikko, henkilot: [key], kalenteri, kokopaiva, paikka, alustava, hoitovuoro, puokkari, puokkari_kuka }]` |
-| `ruokalistat` | `[{ otsikko, rooli: "arki" \| "vuoro", paivat: [{ pvm, ateriat: [{ ateria, ruoat: [{ nimi }] }] }] }]` |
+| `kalenterit` | `[{ kalenteri, ok, tapahtumia }]` — per-source fetch status, mirrors the footer's error report |
+| `viikkonumerot` | `{ "YYYY-MM-DD": "Viikko 44 / 2026" }` — pre-formatted week labels, ~10 entries |
+| `tapahtumat` | `[{ alku, loppu, otsikko, kokopaiva, kalenteri, henkilot: [key], paikka, alustava, hoitovuoro?, puokkari?, puokkari_kuka? }]` |
+| `saa` | `{ paikka, lahde, nyt: {aika, koodi, lampo, tuntuu, tuuli, paiva, sade}, tunnit: [{aika, lampo, koodi, sade_tn, paiva}], paivat: [{pvm, koodi, max, min, sade_mm, sade_tn, aurinko_nousee, aurinko_laskee}] }` |
+| `ruokalistat` | `[{ henkilot, otsikko, lahde, rooli: "arki" \| "vuoro", koodi, ryhma, ok: true, paivat: [{ pvm, ateriat: [{ ateria, ruoat: [{ nimi, merkinnat }] }] }] }]` |
 | `muistutukset` | `{ tila: "ok", kohteet: [{ otsikko, pvm, lapsi, lahde }] }` |
 | `muistilista` | `{ tila: "ok", kohteet: [{ teksti, tehty }] }` |
-| `saa` | `{ lahde, nyt: {koodi, lampo, tuntuu, tuuli, paiva}, tunnit: [{aika, koodi, lampo, paiva}], paivat: [{pvm, koodi, max, min, sade_tn, sade_mm, aurinko_nousee, aurinko_laskee}] }` |
-| `paivitetty` | ISO timestamp; drives the "Päivitetty" status and the staleness warning (`STALE_MIN` = 180) |
 | `virheet` | `[{ lahde }]` — sources that failed during collection, listed in the footer |
 
 Field notes:
 
-- `hoitovuoro: true` marks a daycare shift; `puokkari`/`puokkari_kuka` mark the "puokkari" (shift-swap) tag.
+- `hoitovuoro: true` marks a daycare shift; only shift events carry `puokkari` / `puokkari_kuka`
+  (29 of 30 shifts in the verified payload) — plain events omit those keys entirely.
 - `kokopaiva: true` means an all-day/multi-day event; the UI computes `long` from that or a ≥24 h duration.
-- `alustava: true` renders the "alustava" (tentative) styling.
+- `alustava: true` renders the "alustava" (tentative) styling; `paikka` is optional.
+- `ruokalistat[].ateriat[].ruoat[].merkinnat` carries the daycare's own annotations (allergens/diet notes)
+  and is not currently rendered by the UI.
 - `muistutukset.tila` / `muistilista.tila` are `"ok"` when the source was reachable; anything else shows a
   "not available right now" placeholder instead of failing.
+
 
 ### `prices.json`
 
@@ -320,6 +329,9 @@ There is no test suite and no linter. Anything added must be verified by hand.
 The app expects `data.enc.json` and asks for the planner password on first load, so a plain static server
 is not enough to see real data:
 
+- The planner password (`FAMILY_PLANNER_PASSWORD` for the scripts) is kept **outside git**: locally it
+  lives in `calendarpw.txt` at the repository root, which is gitignored. Never commit it, never echo it,
+  and never put it in a command line argument.
 - Serve the directory with any static server and open it in the tablet or a browser to check layout with
   empty/placeholder state.
 - To exercise real content, either enter the planner password once (it is then cached in `localStorage`),

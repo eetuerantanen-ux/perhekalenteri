@@ -5,6 +5,7 @@ muistilista.json
 muistutukset.json
 ruokalistat.json
 secrets.env
+calendarpw.txt
 *.tmp
 raw/
 shared/
